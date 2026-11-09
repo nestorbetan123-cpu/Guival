@@ -112,7 +112,11 @@ async function entrar(credential){
     const d = await api('login', {credential});
     state.token = d.token; store.set(d.token); state.perfil = d.perfil; go({name:'home'});
   } catch(e){
-    state.loginError = e.message==='NO_AUTORIZADO' ? 'Esta cuenta de Google no está autorizada. Pida acceso a la gerencia de ventas.' : 'No se pudo ingresar: '+e.message;
+    let correo = '';
+    try { correo = JSON.parse(decodeURIComponent(escape(atob(credential.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))))).email || ''; } catch(_){}
+    state.loginError = e.message==='NO_AUTORIZADO'
+      ? `La cuenta ${correo||'de Google'} todavía no está habilitada. Su solicitud quedó registrada: cuando la gerencia de ventas la active, vuelva a entrar.`
+      : 'No se pudo ingresar: '+e.message;
     renderLogin();
   }
 }
@@ -251,6 +255,16 @@ PANTALLAS.usuarios = async t => {
     </table></div>
     ${puede?`<div class="row" style="margin-top:12px"><button class="btn" data-uedit="">+ Nuevo usuario</button></div>`:''}
     <div class="note">Cada persona entra con su cuenta de Google. Si se desactiva, pierde el acceso de inmediato en todos sus equipos. "Ver como" muestra exactamente lo que esa persona ve.</div>
+    ${puede ? (()=>{
+      const conocidos = new Set(A.usuarios.map(u=>String(u.correo).toLowerCase()));
+      const sol = [...new Set(A.bitacora.filter(b=>b.accion==='ingreso_rechazado').map(b=>String(b.correo).toLowerCase()))].filter(c=>!conocidos.has(c));
+      const pend = A.usuarios.filter(u=>/@llenar$/.test(u.correo)).sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre)));
+      if (!sol.length) return '';
+      return `<div class="sec">Solicitudes de ingreso (${sol.length})</div><div class="card"><p style="margin:0 0 10px;font-size:13px;color:var(--mute)">Personas que intentaron entrar y aún no están habilitadas. Escoja a quién corresponde el correo y toque Activar.</p>
+        ${sol.map((c,i)=>`<div class="row" style="margin-bottom:10px;align-items:center"><b style="flex:1 1 200px;word-break:break-all">${esc(c)}</b>
+          <select id="sol${i}" style="flex:1 1 180px;padding:7px"><option value="">— ¿Quién es? —</option>${pend.map(u=>`<option value="${esc(u.correo)}">${esc(u.nombre)}</option>`).join('')}</select>
+          <button class="btn" data-solicitud="${esc(c)}" data-sel="sol${i}">Activar</button></div>`).join('')}</div>`;
+    })() : ''}
     ${perfilActivo().usuario.superadmin && !state.verComo ? `<div class="sec">Enlaces viejos</div><div class="card">
       <p style="margin:0 0 10px">${A.soloApp?'<b>Apagados.</b> Solo se entra por la app.':'<b>Todavía funcionan.</b> Apáguelos cuando todos tengan su correo cargado.'}</p>
       <button class="btn ${A.soloApp?'ghost':''}" data-soloapp="${A.soloApp?'0':'1'}">${A.soloApp?'Volver a activar enlaces':'Apagar enlaces viejos'}</button></div>`:''}
@@ -348,6 +362,12 @@ $app.addEventListener('click', async e=>{
   else if (d.mtema){ temaNuevo=d.mtema; document.querySelectorAll('[data-mtema]').forEach(x=>x.classList.toggle('on',x===el)); }
   else if ('madd' in d){ const nombre=document.getElementById('mnom').value.trim(); if(!nombre) return aviso('Escriba el nombre del módulo',true); adminAccion('admin.saveModule',{modulo:{nombre, tema:temaNuevo}},'Módulo creado'); }
   else if (d.soloapp){ if (!d.confirm){ d.confirm='1'; el.textContent='¿Seguro? Toque otra vez'; return; } adminAccion('admin.setSoloApp',{valor:d.soloapp==='1'}, d.soloapp==='1'?'Enlaces viejos apagados':'Enlaces activados'); }
+  else if (d.solicitud){
+    const pendCorreo = document.getElementById(d.sel).value;
+    if (!pendCorreo) return aviso('Escoja a quién corresponde el correo', true);
+    const u = state.admin.usuarios.find(x=>x.correo===pendCorreo);
+    await adminAccion('admin.saveUser', {user:{...u, correo:d.solicitud, activo:'SI', _reemplaza:pendCorreo}}, u.nombre+' activado');
+  }
   else if ('uedit' in d){ go({name:'usuarioEdit', correo:d.uedit}); }
   else if ('usave' in d){
     const user = { correo:document.getElementById('ucorreo').value.trim().toLowerCase(), nombre:document.getElementById('unombre').value.trim(),
