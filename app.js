@@ -374,7 +374,7 @@ $app.addEventListener('click', async e=>{
       cargo:document.getElementById('ucargo').value.trim(), clave:document.getElementById('uclave').value,
       grupos:[...document.querySelectorAll('[data-ug]:checked')].map(x=>x.value).join(','), activo:document.getElementById('uact').checked?'SI':'NO' };
     if (!user.correo) return aviso('Escriba el correo de Google',true);
-    if (d.usave && d.usave!==user.correo && /@llenar$/.test(d.usave)) user._reemplaza = d.usave;
+    if (d.usave && d.usave!==user.correo) user._reemplaza = d.usave;
     await adminAccion('admin.saveUser',{user},'Usuario guardado'); go({name:'tool', id:'usuarios'});
   }
 });
