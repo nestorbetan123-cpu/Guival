@@ -21,6 +21,9 @@ const I = {
   users:S('<circle cx="9" cy="8" r="4"/><path d="M1 21v-1a6 6 0 0112 0v1M16 4a4 4 0 010 8M23 21v-1a6 6 0 00-4-5.6"/>'),
   lock:S('<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/>'),
   plus:S('<path d="M12 5v14M5 12h14"/>'),
+  compras:S('<path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 01-8 0"/>'),
+  contable:S('<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8M8 10h2M14 10h2M8 14h2M14 14h2M8 18h2M14 18h2"/>'),
+  gestion:S('<circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/><path d="M19 8h4M21 6v4"/>'),
   modulo:S('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>')
 };
 const TEMAS = {
