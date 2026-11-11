@@ -86,3 +86,59 @@ select{font:inherit;font-size:12.5px;padding:4px 6px;border:1px solid var(--line
 @keyframes sp{to{transform:rotate(360deg)}}
 .inst{margin-top:14px;font-size:12.5px;color:var(--mute);text-align:center;line-height:1.45}
 .lvl0{color:var(--off)}
+
+/* ---------- Tablet (vendedores) y pantallas medianas ---------- */
+@media (min-width:700px){
+  html,body{font-size:16px}
+  .top{padding:calc(12px + var(--safe-t)) 24px 12px}
+  .top h1{font-size:19px}
+  .top .mk{width:40px;height:40px}.top .mk img{width:30px}
+  .top .who{font-size:13px}.top .who b{font-size:14.5px}
+  .wrap{padding:24px 28px calc(32px + var(--safe-b))}
+  .hello h2{font-size:24px}.hello p{font-size:14px}
+  /* Inicio: cuadrícula 3×3 grande, cabe completa en pantalla */
+  .grid{max-width:min(820px, calc((100vh - 230px) * 1.25));gap:18px}
+  .mod{padding:24px 12px 18px;gap:10px;border-radius:20px;min-height:150px;justify-content:center}
+  .mod .ic{width:76px;height:76px;border-radius:20px}
+  .mod .ic svg{width:40px;height:40px}
+  .mod span{font-size:16px}.mod small{font-size:12.5px}
+  .mod .pill{font-size:11px;padding:2px 8px;top:8px;right:8px}
+  .mod.empty{min-height:150px}
+  /* Herramientas de un módulo: dos columnas */
+  .list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .list>.note{grid-column:1/-1}
+  .tool{padding:18px;gap:16px;min-height:96px}
+  .tool .ic{width:54px;height:54px;border-radius:14px}
+  .tool .ic svg{width:28px;height:28px}
+  .tool .tx b{font-size:16.5px}.tool .tx p{font-size:13.5px}
+  /* Tablas, botones y campos más cómodos al dedo */
+  table{font-size:14.5px}
+  th{font-size:12.5px}
+  th,td{padding:11px 10px}
+  .btn{padding:12px 18px;font-size:15px;min-height:44px}
+  select{font-size:14px;padding:8px 10px;min-height:38px}
+  input[type=text]{padding:12px 14px;font-size:15px}
+  .tabs button{padding:9px 16px;font-size:14.5px}
+  .kpis{grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+  .kpi{padding:16px}.kpi b{font-size:24px}.kpi small,.kpi i{font-size:13px}
+  .sec{font-size:13px;margin:26px 0 10px}
+  .note{font-size:13.5px}
+  /* Ingreso */
+  .login .box{max-width:460px;padding:36px 32px;border-radius:24px}
+  .logos img{height:110px}
+  .login p{font-size:15px}
+}
+/* Tablet acostada (horizontal): la cuadrícula usa la altura disponible */
+@media (min-width:900px) and (orientation:landscape){
+  .wrap{max-width:1200px}
+  .grid{max-width:min(760px, calc((100vh - 210px) * 1.35))}
+  .mod{min-height:0;padding:16px 10px 12px}
+  .mod .ic{width:64px;height:64px}
+  .hello{margin:0 0 12px}
+}
+/* Pantallas grandes (PC): herramientas en tres columnas */
+@media (min-width:1150px){
+  .list{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+.embed{border:0;width:100%;height:calc(100vh - 58px - var(--safe-t));display:block;background:#fff}
+@media (min-width:700px){.embed{height:calc(100vh - 61px - var(--safe-t))}}

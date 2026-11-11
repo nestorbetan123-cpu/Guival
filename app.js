@@ -212,7 +212,7 @@ PANTALLAS.externa = async t => {
   try { url = (await api('abrir', {herramienta: t.id})).url; }
   catch(e){ $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="note">${esc(e.message)}</div></div>`; return; }
   if (DEMO){ $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="card"><b>${esc(t.nombre)}</b><p style="color:var(--mute)">En la app real aquí se abre la pantalla que ya usan hoy, dentro de la app y sin enlace, PIN ni registro de celular.</p><p style="font-size:12px;color:var(--mute);word-break:break-all">${esc(url)}</p></div></div>`; return; }
-  $app.innerHTML = barra(t.nombre, true) + `<iframe src="${esc(url)}" title="${esc(t.nombre)}" style="border:0;width:100%;height:calc(100vh - 58px - env(safe-area-inset-top,0px));display:block;background:#fff" allow="clipboard-write"></iframe>`;
+  $app.innerHTML = barra(t.nombre, true) + `<iframe src="${esc(url)}" title="${esc(t.nombre)}" class="embed" allow="clipboard-write"></iframe>`;
 };
 
 PANTALLAS.modulos = async t => {
