@@ -82,10 +82,37 @@ function go(v){ state.view = v; render(); window.scrollTo(0,0); }
 
 function barra(title, back){
   const p = perfilActivo();
+  const as = p.asistente ? asis() : null;
+  const who = as ? `<b>${esc(as.persona||'Asistente')}</b>${as.nombre?'por '+esc(as.nombre):'Asistente de ventas'}`
+                 : `<b>${esc(String(p.usuario.nombre).split(' ')[0])}</b>${esc(p.usuario.grupos[0]||'')}`;
   return `${state.verComo?`<div class="banner"><span>Viendo como <b>${esc(state.verComo.usuario.nombre)}</b></span><button class="btn ghost" data-salirver style="padding:4px 10px;font-size:12px">Salir</button></div>`:''}
   <div class="top">${back?`<button class="back" data-back aria-label="Volver">‹</button>`:`<div class="mk"><img src="data:image/png;base64,${LOGO.DMARK}" alt="Guival"></div>`}
     <h1>${esc(title)}</h1>
-    <div class="who"><b>${esc(String(p.usuario.nombre).split(' ')[0])}</b>${esc(p.usuario.grupos[0]||'')}</div></div>`;
+    <div class="who">${who}</div></div>`;
+}
+
+/* ---------- asistente de ventas: quién trabaja y por cuál vendedor ---------- */
+const PERSONAS = ['Sandra Cárdenas', 'Karen Peña'];
+const ls = { get(k){ try { return localStorage.getItem(k)||''; } catch(e){ return ''; } }, set(k,v){ try { localStorage.setItem(k,v); } catch(e){} } };
+function asis(){
+  const p = perfilActivo(), lista = p.asistente||[];
+  const como = ls.get('guival_como'), v = lista.find(x=>x.clave===como);
+  return { persona: ls.get('guival_persona'), como: v?v.clave:'', nombre: v?v.nombre:'' };
+}
+function asistenteHtml(){
+  const p = perfilActivo(); if (!p.asistente) return '';
+  const a = asis(), otra = a.persona && !PERSONAS.includes(a.persona);
+  return `<div class="card asis"><b>Asistente de ventas</b>
+    <p>Todo lo que haga queda a nombre del vendedor, con la marca de quién lo registró.</p>
+    <div class="asg">
+      <label>¿Quién está trabajando?<select data-asper>
+        <option value="">— Escoja —</option>${PERSONAS.map(n=>`<option ${a.persona===n?'selected':''}>${esc(n)}</option>`).join('')}
+        <option value="__otra" ${otra?'selected':''}>Otra persona…</option></select></label>
+      ${otra || state.asOtra ? `<label>Nombre<input type="text" id="asotra" value="${otra?esc(a.persona):''}" placeholder="Nombre y apellido" maxlength="40"></label>` : ''}
+      <label>Vendedor<select data-ascomo><option value="">— Escoja el vendedor —</option>${p.asistente.map(v=>`<option value="${esc(v.clave)}" ${a.como===v.clave?'selected':''}>${esc(v.nombre)}</option>`).join('')}</select></label>
+    </div>
+    ${a.persona && a.como ? `<div class="ok">Trabajando: <b>${esc(a.persona)}</b> por <b>${esc(a.nombre)}</b></div>` : `<div class="falta">Escoja quién trabaja y el vendedor antes de abrir una herramienta.</div>`}
+  </div>`;
 }
 
 /* ---------- ingreso ---------- */
@@ -148,8 +175,9 @@ function renderHome(){
   const mods = p.modulos.map(m=>({...m, tools:p.herramientas.filter(t=>t.modulo===m.id)}));
   const h = new Date().getHours(), saludo = h<12?'Buenos días':h<19?'Buenas tardes':'Buenas noches';
   $app.innerHTML = barra('Guival · Lince') + `<div class="wrap">
-    <div class="hello"><h2>${saludo}, ${esc(String(p.usuario.nombre).split(' ')[0])}</h2>
-    <p>Alcance: ${ALC[p.alcance]||p.alcance}</p></div>
+    <div class="hello"><h2>${saludo}, ${esc(String(p.asistente?(asis().persona||'equipo'):p.usuario.nombre).split(' ')[0])}</h2>
+    <p>${p.asistente?'Asistente de ventas':'Alcance: '+(ALC[p.alcance]||p.alcance)}</p></div>
+    ${asistenteHtml()}
     <div class="grid">
     ${mods.map(m=>{
       const admin = m.tools.some(t=>t.nivel===3);
@@ -218,7 +246,13 @@ const chip = k => `<span class="chip"><i style="background:${TEMAS[k].bar}"></i>
 PANTALLAS.externa = async t => {
   $app.innerHTML = barra(t.nombre, true) + '<div class="spin"></div>';
   let url;
-  try { url = (await api('abrir', {herramienta: t.id})).url; }
+  const extra = {};
+  if (perfilActivo().asistente){
+    const a = asis();
+    if (!a.persona || !a.como){ $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="note">Antes de abrir, escoja en Inicio quién está trabajando y por cuál vendedor.</div><div class="out"><button class="btn" data-home>Ir a Inicio</button></div></div>`; return; }
+    extra.persona = a.persona; extra.como = a.como;
+  }
+  try { url = (await api('abrir', {herramienta: t.id, ...extra})).url; }
   catch(e){ $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="note">${esc(e.message)}</div></div>`; return; }
   if (DEMO){ $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="card"><b>${esc(t.nombre)}</b><p style="color:var(--mute)">En la app real aquí se abre la pantalla que ya usan hoy, dentro de la app y sin enlace, PIN ni registro de celular.</p><p style="font-size:12px;color:var(--mute);word-break:break-all">${esc(url)}</p></div></div>`; return; }
   $app.innerHTML = barra(t.nombre, true) + `<iframe src="${esc(url)}" title="${esc(t.nombre)}" class="embed" allow="clipboard-write"></iframe>`;
@@ -246,52 +280,99 @@ PANTALLAS.modulos = async t => {
   </div>`;
 };
 
+/* ---------- usuarios (18/11): ficha clara por persona, módulos ✓/✗, roles, retirados ---------- */
+const ESTADOS = { SI:['Activo','on'], NO:['Inactivo','off'], RETIRADO:['Retirado','ret'] };
+const estadoDe = u => /^(si|sí|true|1)$/i.test(String(u.activo)) ? 'SI' : /^retirad/i.test(String(u.activo)) ? 'RETIRADO' : 'NO';
+const extraDe = u => { try { return u.permisos_extra ? (typeof u.permisos_extra==='string' ? JSON.parse(u.permisos_extra) : {...u.permisos_extra}) : {}; } catch(e){ return {}; } };
+const gruposDe = u => String(u.grupos||'').split(',').map(s=>s.trim()).filter(Boolean);
+/** Nivel por herramienta según roles + permisos personales (igual que el servidor). */
+function nivelesDe(A, grupos, extra){
+  const n = {};
+  A.herramientas.forEach(h=>n[h.id]=0);
+  if (grupos.includes('superadmin')){ A.herramientas.forEach(h=>n[h.id]=3); return n; }
+  A.permisos.forEach(p=>{ if (grupos.includes(String(p.grupo))) n[p.herramienta] = Math.max(n[p.herramienta]||0, Number(p.nivel)||0); });
+  Object.keys(extra||{}).forEach(k=>{ const v = Number(extra[k]); if (!isNaN(v)) n[k] = Math.max(0, Math.min(3, v)); });
+  return n;
+}
+const modsDe = (A, n) => A.modulos.map(m=>({...m, on: A.herramientas.some(h=>h.modulo===m.id && n[h.id]>0)}));
+const vendedorDe = (A, clave) => { const a = (A.accesos||[]).find(x=>String(x.clave)===String(clave)); return a ? String(a.vendedor||'') : ''; };
+
 PANTALLAS.usuarios = async t => {
   const A = await cargarAdmin(); const puede = nivelDe('usuarios')>=3 && !state.verComo;
-  const f = state.filtroU||'';
-  const lista = A.usuarios.filter(u=>!f || (u.nombre+' '+u.correo).toLowerCase().includes(f.toLowerCase()));
+  const f = state.filtroU||'', fe = state.filtroE||'activos';
   const gname = id => (A.grupos.find(g=>g.id===id)||{nombre:id}).nombre;
-  $app.innerHTML = barra('Usuarios y grupos', true) + `<div class="wrap">
-    <input type="text" id="fusr" placeholder="Buscar por nombre o correo" value="${esc(f)}">
-    <div style="height:10px"></div>
-    <div class="card scroll"><table><tr><th>Usuario</th><th>Grupo</th><th>Activo</th><th></th></tr>
-    ${lista.map(u=>{
-      const pend = /@llenar$/.test(u.correo), act = /^(si|sí|true|1)$/i.test(String(u.activo));
-      return `<tr><td><b>${esc(u.nombre)}</b><br><small style="color:${pend?'#b42318':'var(--mute)'}">${pend?'Falta correo':esc(u.correo)}</small></td>
-      <td>${String(u.grupos).split(',').map(g=>esc(gname(g.trim()))).join(', ')}</td>
-      <td>${act?'Sí':'<span class="lvl0">No</span>'}</td>
-      <td>${puede?`<button class="btn ghost" data-uedit="${esc(u.correo)}" style="padding:5px 10px">Editar</button>`:''}</td></tr>`;}).join('')}
-    </table></div>
-    ${puede?`<div class="row" style="margin-top:12px"><button class="btn" data-uedit="">+ Nuevo usuario</button></div>`:''}
-    <div class="note">Cada persona entra con su cuenta de Google. Si se desactiva, pierde el acceso de inmediato en todos sus equipos. "Ver como" muestra exactamente lo que esa persona ve.</div>
+  const cuenta = {activos:0, pendientes:0, inactivos:0, retirados:0, todos:A.usuarios.length};
+  const tipo = u => { const e = estadoDe(u); return e==='RETIRADO'?'retirados': /@llenar$/.test(u.correo)?'pendientes': e==='SI'?'activos':'inactivos'; };
+  A.usuarios.forEach(u=>cuenta[tipo(u)]++);
+  const lista = A.usuarios.filter(u=>(fe==='todos'||tipo(u)===fe) && (!f || (u.nombre+' '+u.correo+' '+u.grupos).toLowerCase().includes(f.toLowerCase())))
+    .sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre)));
+  const ETQ = {activos:'Activos', pendientes:'Sin correo', inactivos:'Inactivos', retirados:'Retirados', todos:'Todos'};
+  $app.innerHTML = barra('Usuarios', true) + `<div class="wrap">
+    <div class="row" style="gap:10px;align-items:stretch"><input type="text" id="fusr" placeholder="Buscar por nombre, correo o rol" value="${esc(f)}" style="flex:1 1 240px">
+      ${puede?`<button class="btn" data-uedit="">+ Nuevo usuario</button>`:''}</div>
+    <div class="tabs" style="margin:12px 0">${Object.keys(ETQ).map(k=>`<button class="${fe===k?'on':''}" data-fest="${k}">${ETQ[k]} (${cuenta[k]})</button>`).join('')}</div>
+    <div class="list ulist">${lista.map(u=>{
+      const e = estadoDe(u), gs = gruposDe(u), mods = modsDe(A, nivelesDe(A, gs, extraDe(u))), pend = /@llenar$/.test(u.correo), vend = vendedorDe(A, u.clave);
+      return `<button class="ucard" data-uedit="${esc(u.correo)}">
+        <div class="uh"><div><b>${esc(u.nombre)}</b><small style="color:${pend?'#b42318':'var(--mute)'}">${pend?'Falta correo de Google':esc(u.correo)}</small></div><span class="est ${ESTADOS[e][1]}">${ESTADOS[e][0]}</span></div>
+        <div class="roles">${gs.map(g=>`<span class="pill">${esc(gname(g))}</span>`).join('')}${vend?`<span class="pill v">Vendedor: ${esc(vend)}</span>`:''}</div>
+        <div class="mchips">${mods.map(m=>`<span class="mc ${m.on?'on':'off'}">${m.on?'✓':'✗'} ${esc(m.nombre)}</span>`).join('')}</div>
+      </button>`;}).join('') || '<div class="note">No hay usuarios en esta lista.</div>'}</div>
     ${puede ? (()=>{
       const conocidos = new Set(A.usuarios.map(u=>String(u.correo).toLowerCase()));
       const sol = [...new Set(A.bitacora.filter(b=>b.accion==='ingreso_rechazado').map(b=>String(b.correo).toLowerCase()))].filter(c=>!conocidos.has(c));
-      const pend = A.usuarios.filter(u=>/@llenar$/.test(u.correo)).sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre)));
+      const pend = A.usuarios.filter(u=>estadoDe(u)==='NO').sort((a,b)=>String(a.nombre).localeCompare(String(b.nombre)));
       if (!sol.length) return '';
-      return `<div class="sec">Solicitudes de ingreso (${sol.length})</div><div class="card"><p style="margin:0 0 10px;font-size:13px;color:var(--mute)">Personas que intentaron entrar y aún no están habilitadas. Escoja a quién corresponde el correo y toque Activar.</p>
+      return `<div class="sec">Solicitudes de ingreso (${sol.length})</div><div class="card"><p style="margin:0 0 10px;font-size:13px;color:var(--mute)">Personas que intentaron entrar y aún no están habilitadas. Escoja a quién corresponde el correo y toque Activar. Si la persona no está en la lista, créela con "+ Nuevo usuario".</p>
         ${sol.map((c,i)=>`<div class="row" style="margin-bottom:10px;align-items:center"><b style="flex:1 1 200px;word-break:break-all">${esc(c)}</b>
           <select id="sol${i}" style="flex:1 1 180px;padding:7px"><option value="">— ¿Quién es? —</option>${pend.map(u=>`<option value="${esc(u.correo)}">${esc(u.nombre)}</option>`).join('')}</select>
           <button class="btn" data-solicitud="${esc(c)}" data-sel="sol${i}">Activar</button></div>`).join('')}</div>`;
     })() : ''}
+    <div class="note">Activo: entra a la app. Inactivo: no entra por ahora. Retirado: ya no trabaja; no entra a la app, pero sus ventas, facturas y cartera siguen apareciendo en todos los reportes.</div>
     ${perfilActivo().usuario.superadmin && !state.verComo ? `<div class="sec">Enlaces viejos</div><div class="card">
-      <p style="margin:0 0 10px">${A.soloApp?'<b>Apagados.</b> Solo se entra por la app.':'<b>Todavía funcionan.</b> Apáguelos cuando todos tengan su correo cargado.'}</p>
+      <p style="margin:0 0 10px">${A.soloApp?'<b>Apagados.</b> Solo se entra por la app. No los vuelva a activar.':'<b>Todavía funcionan.</b> Apáguelos cuando todos tengan su correo cargado.'}</p>
       <button class="btn ${A.soloApp?'ghost':''}" data-soloapp="${A.soloApp?'0':'1'}">${A.soloApp?'Volver a activar enlaces':'Apagar enlaces viejos'}</button></div>`:''}
   </div>`;
 };
+
 PANTALLAS.usuarioEdit = async () => {
-  const A = await cargarAdmin(), c = state.view.correo;
-  const u = A.usuarios.find(x=>x.correo===c) || {correo:'',nombre:'',cargo:'',clave:'',grupos:'mayoristas',activo:'SI'};
-  const gs = String(u.grupos).split(',').map(s=>s.trim());
-  $app.innerHTML = barra(c?'Editar usuario':'Nuevo usuario', true) + `<div class="wrap"><div class="card" style="display:flex;flex-direction:column;gap:10px">
-    <label>Correo de Google<input type="text" id="ucorreo" value="${/@llenar$/.test(u.correo)?'':esc(u.correo)}" placeholder="nombre@gmail.com" inputmode="email" autocapitalize="off"></label>
-    <label>Nombre<input type="text" id="unombre" value="${esc(u.nombre)}"></label>
-    <label>Cargo<input type="text" id="ucargo" value="${esc(u.cargo)}"></label>
-    <label>Vista en Tablero y Cartera (persona en Accesos)<select id="uclave" style="width:100%;padding:9px"><option value="">— Ninguna —</option>${(A.accesos||[]).map(a=>`<option value="${esc(a.clave)}" ${String(a.clave)===String(u.clave)?'selected':''}>${esc(a.nombre)} · ${esc(a.ve)}</option>`).join('')}</select></label>
-    <div><b style="font-size:13px">Grupos</b><div class="row" style="margin-top:6px">${A.grupos.map(g=>`<label style="display:flex;gap:6px;align-items:center;font-size:13.5px;border:1px solid var(--line);border-radius:99px;padding:5px 10px"><input type="checkbox" data-ug value="${esc(g.id)}" ${gs.includes(g.id)?'checked':''}>${esc(g.nombre)}</label>`).join('')}</div></div>
-    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="uact" ${/^(si|sí|true|1)$/i.test(String(u.activo))?'checked':''}> Activo</label>
-    <div class="row"><button class="btn" data-usave="${esc(u.correo)}">Guardar</button>${c && !/@llenar$/.test(c)?`<button class="btn ghost" data-vercomo="${esc(c)}">Ver como</button>`:''}</div>
-  </div></div>`;
+  const A = await cargarAdmin(), c = state.view.correo, puede = nivelDe('usuarios')>=3 && !state.verComo;
+  if (!state.draft || state.draft._de !== c){
+    const u = A.usuarios.find(x=>x.correo===c) || {correo:'',nombre:'',cargo:'',clave:'',grupos:'mayoristas',activo:'SI',permisos_extra:''};
+    state.draft = { _de:c, correo:/@llenar$/.test(u.correo)?'':u.correo, nombre:u.nombre, cargo:u.cargo, clave:String(u.clave||''), grupos:gruposDe(u), estado:estadoDe(u), extra:extraDe(u), abiertos:{} };
+  }
+  const d = state.draft, n = nivelesDe(A, d.grupos, d.extra), base = nivelesDe(A, d.grupos, {}), sup = d.grupos.includes('superadmin');
+  const dis = puede ? '' : 'disabled';
+  $app.innerHTML = barra(c?d.nombre||'Usuario':'Nuevo usuario', true) + `<div class="wrap ficha">
+    <div class="card">
+      <div class="seg">${Object.keys(ESTADOS).map(k=>`<button class="${d.estado===k?'on '+ESTADOS[k][1]:''}" data-uest="${k}" ${dis}>${ESTADOS[k][0]}</button>`).join('')}</div>
+      <p class="hint">${d.estado==='SI'?'Entra a la app con su correo de Google.':d.estado==='NO'?'No entra a la app por ahora.':'Ya no trabaja: no entra a la app, pero sus ventas, facturas y cartera siguen en todos los reportes.'}</p>
+      <div class="campos">
+        <label>Correo de Google<input type="text" id="ucorreo" data-ud="correo" value="${esc(d.correo)}" placeholder="nombre@gmail.com" inputmode="email" autocapitalize="off" ${dis}></label>
+        <label>Nombre<input type="text" id="unombre" data-ud="nombre" value="${esc(d.nombre)}" ${dis}></label>
+        <label>Cargo<input type="text" id="ucargo" data-ud="cargo" value="${esc(d.cargo)}" ${dis}></label>
+        <label>Vendedor (qué ventas y cartera ve)<select id="uclave" data-ud="clave" ${dis}><option value="">— Ninguno —</option>${(A.accesos||[]).map(a=>`<option value="${esc(a.clave)}" ${String(a.clave)===d.clave?'selected':''}>${esc(a.nombre)}${a.vendedor?' · '+esc(a.vendedor):' · '+esc(a.ve)}</option>`).join('')}</select></label>
+      </div>
+    </div>
+    <div class="sec">Roles</div>
+    <div class="card"><div class="row">${A.grupos.map(g=>`<label class="rchip ${d.grupos.includes(g.id)?'on':''}"><input type="checkbox" data-ug value="${esc(g.id)}" ${d.grupos.includes(g.id)?'checked':''} ${dis}>${esc(g.nombre)}</label>`).join('')}</div>
+      <p class="hint" style="margin-bottom:0">El rol da los accesos de base. Abajo puede dar o quitar módulos solo a esta persona.</p></div>
+    <div class="sec">Acceso a módulos</div>
+    <div class="mlist">${A.modulos.map(m=>{
+      const ts = A.herramientas.filter(h=>h.modulo===m.id), on = ts.some(h=>n[h.id]>0), ab = d.abiertos[m.id];
+      return `<div class="card mrow ${on?'on':'off'}">
+        <div class="mh"><button class="mname" data-mab="${esc(m.id)}"><span class="st">${on?'✓':'✗'}</span><b>${esc(m.nombre)}</b><small>${on?'Con acceso':'Sin acceso'} · ${ts.length} herramienta${ts.length!==1?'s':''} ${ab?'▴':'▾'}</small></button>
+          ${puede && !sup ? `<button class="btn ${on?'ghost':''}" data-mtog="${esc(m.id)}">${on?'Quitar':'Dar acceso'}</button>`:''}</div>
+        ${ab ? `<div class="tl">${ts.map(h=>{ const pers = h.id in d.extra && Number(d.extra[h.id])!==base[h.id];
+          return `<div class="trow"><span>${esc(h.nombre)}${pers?' <i class="pers">personal</i>':''}</span>
+            ${puede && !sup ? `<select data-tniv="${esc(h.id)}">${NIVEL.map((l,i)=>`<option value="${i}" ${i===n[h.id]?'selected':''}>${l}</option>`).join('')}</select>` : `<span class="${n[h.id]?'':'lvl0'}">${NIVEL[n[h.id]]}</span>`}</div>`;}).join('') || '<p class="hint">Sin herramientas.</p>'}</div>` : ''}
+      </div>`;}).join('')}</div>
+    ${sup?'<div class="note">Superadmin: tiene acceso a todo.</div>':''}
+    ${puede?`<div class="row acciones"><button class="btn" data-usave="${esc(c)}">Guardar</button>
+      ${c && !/@llenar$/.test(c)?`<button class="btn ghost" data-vercomo="${esc(c)}">Ver como</button>`:''}
+      ${c && !sup?`<button class="btn ghost" data-udel="${esc(c)}" style="color:#b42318">Eliminar de la app</button>`:''}</div>
+      <p class="hint">Eliminar solo borra a la persona de la app. Para alguien que ya no trabaja es mejor "Retirado".</p>`:''}
+  </div>`;
 };
 
 PANTALLAS.permisos = async t => {
@@ -377,24 +458,43 @@ $app.addEventListener('click', async e=>{
     const u = state.admin.usuarios.find(x=>x.correo===pendCorreo);
     await adminAccion('admin.saveUser', {user:{...u, correo:d.solicitud, activo:'SI', _reemplaza:pendCorreo}}, u.nombre+' activado');
   }
-  else if ('uedit' in d){ go({name:'usuarioEdit', correo:d.uedit}); }
-  else if ('usave' in d){
-    const user = { correo:document.getElementById('ucorreo').value.trim().toLowerCase(), nombre:document.getElementById('unombre').value.trim(),
-      cargo:document.getElementById('ucargo').value.trim(), clave:document.getElementById('uclave').value,
-      grupos:[...document.querySelectorAll('[data-ug]:checked')].map(x=>x.value).join(','), activo:document.getElementById('uact').checked?'SI':'NO' };
-    if (!user.correo) return aviso('Escriba el correo de Google',true);
-    if (d.usave && d.usave!==user.correo) user._reemplaza = d.usave;
-    await adminAccion('admin.saveUser',{user},'Usuario guardado'); go({name:'tool', id:'usuarios'});
+  else if ('uedit' in d){ state.draft=null; go({name:'usuarioEdit', correo:d.uedit}); }
+  else if (d.fest){ state.filtroE=d.fest; render(); }
+  else if ('home' in d){ go({name:'home'}); }
+  else if (d.uest){ state.draft.estado=d.uest; render(); }
+  else if (d.mab){ const ab=state.draft.abiertos; ab[d.mab]=!ab[d.mab]; render(); }
+  else if (d.mtog){
+    const A=state.admin, dr=state.draft, ts=A.herramientas.filter(h=>h.modulo===d.mtog);
+    const on = ts.some(h=>nivelesDe(A,dr.grupos,dr.extra)[h.id]>0);
+    if (on) ts.forEach(h=>dr.extra[h.id]=0);
+    else { ts.forEach(h=>delete dr.extra[h.id]); const n=nivelesDe(A,dr.grupos,dr.extra); if (!ts.some(h=>n[h.id]>0)) ts.forEach(h=>dr.extra[h.id]=1); dr.abiertos[d.mtog]=true; }
+    render();
   }
+  else if ('usave' in d){
+    const dr = state.draft;
+    const user = { correo:String(dr.correo||'').trim().toLowerCase(), nombre:String(dr.nombre||'').trim(), cargo:String(dr.cargo||'').trim(), clave:dr.clave,
+      grupos:dr.grupos.join(','), activo:dr.estado, permisos_extra:Object.keys(dr.extra).length?JSON.stringify(dr.extra):'' };
+    if (!user.nombre) return aviso('Escriba el nombre',true);
+    if (!user.correo){ if (d.usave && /@llenar$/.test(d.usave)) user.correo=d.usave; else return aviso('Escriba el correo de Google',true); }
+    if (d.usave && d.usave!==user.correo) user._reemplaza = d.usave;
+    await adminAccion('admin.saveUser',{user},'Usuario guardado'); state.draft=null; go({name:'tool', id:'usuarios'});
+  }
+  else if (d.udel){ if (!d.confirm){ d.confirm='1'; el.textContent='¿Seguro? Toque otra vez'; return; } await adminAccion('admin.deleteUser',{correo:d.udel},'Usuario eliminado'); state.draft=null; go({name:'tool', id:'usuarios'}); }
 });
 $app.addEventListener('change', e=>{
   const s = e.target, d = s.dataset;
-  if (d.perm){ const [grupo,herramienta]=d.perm.split('|'); adminAccion('admin.setPerm',{grupo,herramienta,nivel:+s.value},'Permiso guardado'); }
+  if (d.ud){ state.draft[d.ud]=s.value; }
+  else if ('ug' in d){ const g=state.draft.grupos, k=s.value; if (s.checked){ if(!g.includes(k)) g.push(k); } else state.draft.grupos=g.filter(x=>x!==k); render(); }
+  else if (d.tniv){ const dr=state.draft, A=state.admin, base=nivelesDe(A,dr.grupos,{}); if (+s.value===base[d.tniv]) delete dr.extra[d.tniv]; else dr.extra[d.tniv]=+s.value; render(); }
+  else if ('asper' in d){ if (s.value==='__otra'){ state.asOtra=true; ls.set('guival_persona',''); } else { state.asOtra=false; ls.set('guival_persona', s.value); } render(); }
+  else if ('ascomo' in d){ ls.set('guival_como', s.value); render(); }
+  else if (s.id==='asotra'){ ls.set('guival_persona', s.value.trim()); render(); }
+  else if (d.perm){ const [grupo,herramienta]=d.perm.split('|'); adminAccion('admin.setPerm',{grupo,herramienta,nivel:+s.value},'Permiso guardado'); }
   else if (d.galc){ const g = state.admin.grupos.find(x=>x.id===d.galc); adminAccion('admin.saveGroup',{grupo:{...g, alcance:s.value}},'Alcance guardado'); }
   else if (d.tmod){ const h = state.admin.herramientas.find(x=>x.id===d.tmod); adminAccion('admin.saveTool',{tool:{...h, modulo:s.value}},'Herramienta movida'); }
   else if (d.test){ const h = state.admin.herramientas.find(x=>x.id===d.test); adminAccion('admin.saveTool',{tool:{...h, estado:s.value}},'Estado guardado'); }
 });
-$app.addEventListener('input', e=>{ if (e.target.id==='fusr'){ state.filtroU=e.target.value; clearTimeout(state._ft); state._ft=setTimeout(()=>{ render().then(()=>{ const i=document.getElementById('fusr'); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length);} }); },250);} });
+$app.addEventListener('input', e=>{ if (e.target.dataset && e.target.dataset.ud && state.draft){ state.draft[e.target.dataset.ud]=e.target.value; return; } if (e.target.id==='fusr'){ state.filtroU=e.target.value; clearTimeout(state._ft); state._ft=setTimeout(()=>{ render().then(()=>{ const i=document.getElementById('fusr'); if(i){ i.focus(); i.setSelectionRange(i.value.length,i.value.length);} }); },250);} });
 
 if ('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
 render();
