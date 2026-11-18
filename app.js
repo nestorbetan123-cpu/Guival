@@ -252,6 +252,9 @@ PANTALLAS.externa = async t => {
     if (!a.persona || !a.como){ $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="note">Antes de abrir, escoja en Inicio quién está trabajando y por cuál vendedor.</div><div class="out"><button class="btn" data-home>Ir a Inicio</button></div></div>`; return; }
     extra.persona = a.persona; extra.como = a.como;
   }
+  if (t.id==='dashboard' && !DEMO){   // Dashboard: pantalla propia de la app (datos por el servidor de la app, caché en el equipo)
+    $app.innerHTML = barra(t.nombre, true) + `<iframe src="dashboard.html?v=1" title="${esc(t.nombre)}" class="embed"></iframe>`; return;
+  }
   try { url = (await api('abrir', {herramienta: t.id, ...extra})).url; }
   catch(e){ $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="note">${esc(e.message)}</div></div>`; return; }
   if (DEMO){ $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="card"><b>${esc(t.nombre)}</b><p style="color:var(--mute)">En la app real aquí se abre la pantalla que ya usan hoy, dentro de la app y sin enlace, PIN ni registro de celular.</p><p style="font-size:12px;color:var(--mute);word-break:break-all">${esc(url)}</p></div></div>`; return; }
