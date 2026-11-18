@@ -50,8 +50,17 @@ async function api(action, payload){
   let res;
   if (DEMO) res = await window.GuivalMock.call(body);
   else {
-    const r = await fetch(CFG.API_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body)});
-    res = await r.json();
+    // Si el servidor de Google está ocupado o falla la red, reintenta 2 veces (1,5 s y 3 s) antes de avisar.
+    for (let intento = 0; ; intento++){
+      try {
+        const r = await fetch(CFG.API_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body)});
+        res = await r.json();
+        break;
+      } catch(e){
+        if (intento >= 2) throw new Error('El servidor está ocupado o no hay conexión. Intente de nuevo en un momento.');
+        await new Promise(ok => setTimeout(ok, 1500 * (intento + 1)));
+      }
+    }
   }
   if (!res.ok){
     if (res.error === 'SESION'){ store.set(null); state.token=null; state.perfil=null; render(); }
