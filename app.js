@@ -53,7 +53,8 @@ async function api(action, payload){
     // Si el servidor de Google está ocupado o falla la red, reintenta 2 veces (1,5 s y 3 s) antes de avisar.
     for (let intento = 0; ; intento++){
       try {
-        const r = await fetch(CFG.API_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body)});
+        const ctl = new AbortController(), to = setTimeout(()=>ctl.abort(), 45000);   // nunca esperar más de 45 s
+        const r = await fetch(CFG.API_URL, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body), signal: ctl.signal}).finally(()=>clearTimeout(to));
         res = await r.json();
         break;
       } catch(e){
@@ -434,7 +435,8 @@ async function render(){
 /* ---------- eventos ---------- */
 let temaNuevo = 'ab';
 $app.addEventListener('click', async e=>{
-  const el = e.target.closest('button,[data-mtema]'); if (!el || state.busy) return;
+  const el = e.target.closest('button,[data-mtema]'); if (!el) return;
+  if (state.busy && !('back' in el.dataset) && !('home' in el.dataset)) return;   // mientras guarda, solo se puede volver
   const d = el.dataset;
   if (d.demo){ entrar(window.GuivalMock.credencial(d.demo)); }
   else if (d.mod) go({name:'mod', id:d.mod});
