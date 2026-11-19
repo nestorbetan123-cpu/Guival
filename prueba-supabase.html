@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Guival · prueba Supabase</title>
+<style>
+ body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#f4f6fb;color:#1b2540}
+ .card{background:#fff;border-radius:12px;padding:16px;max-width:560px;margin:0 auto 12px;box-shadow:0 1px 3px #0002}
+ h1{font-size:18px;margin:0 0 8px} .ok{color:#067647} .mal{color:#b42318}
+ .chip{display:inline-block;background:#e8eefc;border-radius:99px;padding:3px 10px;margin:2px;font-size:13px}
+ button{padding:8px 14px;border-radius:8px;border:1px solid #c5cde0;background:#fff}
+ pre{white-space:pre-wrap;font-size:12px;color:#555}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://accounts.google.com/gsi/client" async></script>
+</head><body>
+<div class="card"><h1>Prueba de ingreso a la base nueva (Supabase)</h1>
+ <p>Entre con su cuenta de Google. Esta página solo lee su perfil; no cambia nada.</p>
+ <div id="gbtn"></div><div id="estado"></div></div>
+<div class="card" id="res" hidden></div>
+<script>
+const SB_URL = 'https://ywzedhfyavxnneoxspns.supabase.co';
+const SB_KEY = 'sb_publishable_ETgmqOlhdvluv9xBgAytxw_LSC1KARV'; // llave pública: sin sesión no ve nada (RLS)
+const GOOGLE_ID = '1079849232624-eirjjnch6v0jm4t0dag5180n9mh6jb7l.apps.googleusercontent.com';
+const sb = supabase.createClient(SB_URL, SB_KEY);
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let nonce = '';
+
+async function sha256(t){ const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2,'0')).join(''); }
+
+async function mostrar(){
+  const t0 = performance.now();
+  const v = await sb.rpc('vincular');
+  const { data: p, error } = await sb.rpc('mi_perfil');
+  const ms = Math.round(performance.now() - t0);
+  // prueba de candado: leer TODOS los usuarios (solo admin debe poder)
+  const { data: todos } = await sb.from('usuarios').select('nombre');
+  const r = $('res'); r.hidden = false;
+  if (error || !p){ r.innerHTML = `<p class="mal"><b>Su correo no está habilitado.</b> Quedó anotado como solicitud.</p><pre>${esc(error?.message || v.error?.message || '')}</pre>`; return; }
+  r.innerHTML = `<p class="ok"><b>Entró: ${esc(p.usuario.nombre)}</b> (${esc(p.usuario.correo)}) · respuesta en ${ms} ms</p>
+    <p>Roles: ${p.grupos.map(g => `<span class="chip">${esc(g)}</span>`).join('')}</p>
+    <p>Módulos que ve: ${(p.modulos||[]).map(m => `<span class="chip">${esc(m.nombre)}</span>`).join('') || '—'}</p>
+    <p>Fichas de usuarios que la base le deja leer: <b>${(todos||[]).length}</b> ${(todos||[]).length > 1 ? '(es administrador)' : '(solo la suya)'}</p>
+    <button onclick="salir()">Salir</button>`;
+}
+async function salir(){ await sb.auth.signOut(); location.reload(); }
+
+async function iniciar(){
+  const { data: { session } } = await sb.auth.getSession();
+  if (session){ $('estado').textContent = 'Sesión abierta.'; return mostrar(); }
+  nonce = crypto.randomUUID();
+  google.accounts.id.initialize({ client_id: GOOGLE_ID, nonce: await sha256(nonce),
+    callback: async resp => {
+      $('estado').textContent = 'Verificando…';
+      const { error } = await sb.auth.signInWithIdToken({ provider: 'google', token: resp.credential, nonce });
+      if (error){ $('estado').innerHTML = `<p class="mal">${esc(error.message)}</p>`; return; }
+      $('estado').textContent = ''; mostrar();
+    }});
+  google.accounts.id.renderButton($('gbtn'), { theme: 'outline', size: 'large', text: 'signin_with', locale: 'es' });
+}
+window.addEventListener('load', () => { const w = setInterval(() => { if (window.google?.accounts?.id){ clearInterval(w); iniciar(); } }, 100); });
+</script>
+</body></html>
