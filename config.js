@@ -2,5 +2,8 @@
 // Si API_URL está vacío la app funciona en MODO DEMO (servidor simulado, sin datos reales).
 window.GUIVAL_CONFIG = {
   API_URL: 'https://script.google.com/macros/s/AKfycbyuhmiEzahmLp2oXdltTqcdslOo89iCPiCaSytjqBh3rz-Z-e2i1g65WddGiB-jTJT4ng/exec',            // URL /exec de la implementación del servidor (Apps Script)
-  GOOGLE_CLIENT_ID: '1079849232624-eirjjnch6v0jm4t0dag5180n9mh6jb7l.apps.googleusercontent.com'    // Client ID de Google (termina en .apps.googleusercontent.com)
+  GOOGLE_CLIENT_ID: '1079849232624-eirjjnch6v0jm4t0dag5180n9mh6jb7l.apps.googleusercontent.com',   // Client ID de Google (termina en .apps.googleusercontent.com)
+  // Base nueva (Supabase). La llave es pública a propósito: sin sesión no se ve nada (candados RLS).
+  SB_URL: 'https://ywzedhfyavxnneoxspns.supabase.co',
+  SB_KEY: 'sb_publishable_ETgmqOlhdvluv9xBgAytxw_LSC1KARV'
 };

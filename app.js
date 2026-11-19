@@ -131,9 +131,31 @@ function renderLogin(){
       `<button class="ubtn" data-demo="${esc(c.correo)}"><div class="av">${esc(c.nombre[0])}</div><div><b>${esc(c.nombre)}</b><small>${esc(c.correo)}</small></div></button>`).join('');
   } else cargarGoogle();
 }
+/* ---------- base nueva (Supabase): con el mismo ingreso de Google abre también su sesión, en silencio ----------
+   Sin librerías (app liviana): dos llamadas HTTP. Si falla, la app sigue igual con el servidor actual. */
+const sb = {
+  nonce: '',
+  async hash(t){ const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t)); return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join(''); },
+  async preparar(){ try { this.nonce = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)+Date.now()); return await this.hash(this.nonce); } catch(e){ this.nonce=''; return undefined; } },
+  async entrar(credential){
+    if (!CFG.SB_URL || !credential) return;
+    try {
+      const r = await fetch(CFG.SB_URL + '/auth/v1/token?grant_type=id_token', { method:'POST',
+        headers:{ 'Content-Type':'application/json', apikey: CFG.SB_KEY },
+        body: JSON.stringify(Object.assign({ provider:'google', id_token: credential }, this.nonce ? { nonce: this.nonce } : {})) });
+      const d = await r.json(); if (!d.access_token) return;
+      ls.set('guival_sb', JSON.stringify({ rt: d.refresh_token, exp: Date.now() + (d.expires_in||3600)*1000 }));
+      await fetch(CFG.SB_URL + '/rest/v1/rpc/vincular', { method:'POST',
+        headers:{ 'Content-Type':'application/json', apikey: CFG.SB_KEY, Authorization: 'Bearer ' + d.access_token }, body:'{}' });
+    } catch(e){ /* la base nueva todavía es opcional */ }
+  },
+  salir(){ try { localStorage.removeItem('guival_sb'); } catch(e){} }
+};
+
 function cargarGoogle(){
-  const pintar = () => {
-    google.accounts.id.initialize({ client_id: CFG.GOOGLE_CLIENT_ID, callback: r => entrar(r.credential), ux_mode:'popup', auto_select:false });
+  const pintar = async () => {
+    const nonce = await sb.preparar();
+    google.accounts.id.initialize(Object.assign({ client_id: CFG.GOOGLE_CLIENT_ID, callback: r => entrar(r.credential), ux_mode:'popup', auto_select:false }, nonce ? { nonce } : {}));
     const el = document.getElementById('gbtn'); if (!el) return;
     el.innerHTML = '';
     google.accounts.id.renderButton(el, {theme:'filled_blue', size:'large', shape:'pill', text:'continue_with', locale:'es', width: 280});
@@ -148,6 +170,7 @@ async function entrar(credential){
   try {
     const d = await api('login', {credential});
     state.token = d.token; store.set(d.token); state.perfil = d.perfil; go({name:'home'});
+    sb.entrar(credential);   // en segundo plano; no hace esperar al usuario
   } catch(e){
     let correo = '';
     try { correo = JSON.parse(decodeURIComponent(escape(atob(credential.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))))).email || ''; } catch(_){}
@@ -447,7 +470,7 @@ $app.addEventListener('click', async e=>{
     else if (v.name==='tool'){ const t = perfilActivo().herramientas.find(x=>x.id===v.id); go(t && t.modulo ? {name:'mod', id:t.modulo} : {name:'home'}); }
     else go({name:'home'});
   }
-  else if ('logout' in d){ try { await api('logout'); } catch(_){}; store.set(null); state.token=null; state.perfil=null; state.admin=null; state.verComo=null; if (window.google&&google.accounts) google.accounts.id.disableAutoSelect(); go({name:'home'}); }
+  else if ('logout' in d){ try { await api('logout'); } catch(_){}; store.set(null); sb.salir(); state.token=null; state.perfil=null; state.admin=null; state.verComo=null; if (window.google&&google.accounts) google.accounts.id.disableAutoSelect(); go({name:'home'}); }
   else if ('instalar' in d){ promptInstalar.prompt(); promptInstalar = null; }
   else if ('reload' in d){ state.perfil=null; render(); }
   else if ('salirver' in d){ state.verComo=null; go({name:'tool', id:'usuarios'}); }
