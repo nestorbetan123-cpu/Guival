@@ -327,13 +327,13 @@ function pasa(i,mk){
 // ------------------------------------------------------------ formato
 const nf=new Intl.NumberFormat('es-CO',{maximumFractionDigits:0});
 const nf1=new Intl.NumberFormat('es-CO',{minimumFractionDigits:1,maximumFractionDigits:1});
+const nf2=new Intl.NumberFormat('es-CO',{minimumFractionDigits:2,maximumFractionDigits:2});   // millones con 2 decimales (19/11)
 function fmt(v,med){return med==='venta'?'$'+nf.format(v):nf.format(v)}
-function ftab(v,med){if(!v)return '–';return med==='venta'?nf1.format(v/1e6):nf.format(v)}
+function ftab(v,med){if(!v)return '–';return med==='venta'?nf2.format(v/1e6):nf.format(v)}
 function corto(v,med){
   if(med!=='venta')return nf.format(v);
   const a=Math.abs(v);
-  if(a>=1e8)return '$'+nf.format(v/1e6)+' M';
-  if(a>=1e6)return '$'+nf1.format(v/1e6)+' M';
+  if(a>=1e6)return '$'+nf2.format(v/1e6)+' M';
   return '$'+nf.format(v);
 }
 function varPct(a,b){if(!b)return null;return (a-b)/Math.abs(b)*100}

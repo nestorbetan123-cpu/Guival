@@ -254,7 +254,7 @@ PANTALLAS.externa = async t => {
     extra.persona = a.persona; extra.como = a.como;
   }
   if (t.id==='dashboard' && !DEMO){   // Dashboard: pantalla propia de la app (datos por el servidor de la app, caché en el equipo)
-    $app.innerHTML = barra(t.nombre, true) + `<iframe src="dashboard.html?v=1" title="${esc(t.nombre)}" class="embed"></iframe>`; return;
+    $app.innerHTML = barra(t.nombre, true) + `<iframe src="dashboard.html?v=2" title="${esc(t.nombre)}" class="embed"></iframe>`; return;
   }
   try { url = (await api('abrir', {herramienta: t.id, ...extra})).url; }
   catch(e){ $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="note">${esc(e.message)}</div></div>`; return; }
