@@ -144,12 +144,12 @@ const sb = {
         headers:{ 'Content-Type':'application/json', apikey: CFG.SB_KEY },
         body: JSON.stringify(Object.assign({ provider:'google', id_token: credential }, this.nonce ? { nonce: this.nonce } : {})) });
       const d = await r.json(); if (!d.access_token) return;
-      ls.set('guival_sb', JSON.stringify({ rt: d.refresh_token, exp: Date.now() + (d.expires_in||3600)*1000 }));
+      window.GuivalSB && GuivalSB.guardar(d);
       await fetch(CFG.SB_URL + '/rest/v1/rpc/vincular', { method:'POST',
         headers:{ 'Content-Type':'application/json', apikey: CFG.SB_KEY, Authorization: 'Bearer ' + d.access_token }, body:'{}' });
     } catch(e){ /* la base nueva todavía es opcional */ }
   },
-  salir(){ try { localStorage.removeItem('guival_sb'); } catch(e){} }
+  salir(){ window.GuivalSB && GuivalSB.salir(); }
 };
 
 function cargarGoogle(){
@@ -278,6 +278,12 @@ PANTALLAS.externa = async t => {
   }
   if (t.id==='dashboard' && !DEMO){   // Dashboard: pantalla propia de la app (datos por el servidor de la app, caché en el equipo)
     $app.innerHTML = barra(t.nombre, true) + `<iframe src="dashboard.html?v=2" title="${esc(t.nombre)}" class="embed"></iframe>`; return;
+  }
+  // Indicadores y Entradas: pantallas propias que leen de la base nueva (Supabase). Si la persona todavía no tiene
+  // sesión en la base nueva (entró antes del cambio) o el administrador está en "Ver como", se abre la pantalla anterior.
+  const NUEVAS = { indicadores:'indicadores.html?v=1', ingresos:'entradas.html?v=1' };
+  if (NUEVAS[t.id] && !DEMO && !state.verComo && window.GuivalSB && GuivalSB.tiene()){
+    $app.innerHTML = barra(t.nombre, true) + `<iframe src="${NUEVAS[t.id]}" title="${esc(t.nombre)}" class="embed"></iframe>`; return;
   }
   try { url = (await api('abrir', {herramienta: t.id, ...extra})).url; }
   catch(e){ $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="note">${esc(e.message)}</div></div>`; return; }

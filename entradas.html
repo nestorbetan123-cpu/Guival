@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Entradas a bodega</title>
+<style>
+/* Entradas a bodega – pantalla propia de la App Guival (antes EntradasPagina de Apps Script).
+   Datos: base nueva (Supabase, función entradas_datos). Módulo Compras: azul y blanco.
+   20/11: casas, documentos y productos se pueden abrir para ver fechas, documentos y referencias. */
+:root{--brand:#001f60;--ink:#0d1b3a;--mute:#5c6782;--line:#dde2ec;--soft:#e8edf7;--bg:#f3f5f9;--card:#fff;--zebra:#f6f8fb}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;font-size:14px}
+button,input{font:inherit;color:inherit}
+.wrap{max-width:980px;margin:0 auto;padding:14px 16px 40px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tabs button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 13px;cursor:pointer}
+.tabs button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+.row{display:flex;gap:10px;align-items:center}
+.btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 14px;font-weight:600;cursor:pointer;color:var(--brand)}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:10px 0 14px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.kpi small{display:block;color:var(--mute);font-size:12px}
+.kpi b{display:block;font-size:20px;margin:2px 0}
+.kpi i{font-style:normal;color:var(--mute);font-size:12px}
+@media(max-width:480px){.kpi b{font-size:17px}}
+input[type=search]{width:100%;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff;margin-bottom:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px}
+.sec{font-weight:700;color:var(--mute);font-size:12.5px;text-transform:uppercase;letter-spacing:.03em;margin:14px 2px 6px}
+details.it{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:8px}
+details.it>summary{list-style:none;cursor:pointer;padding:11px 14px;display:flex;gap:10px;align-items:center}
+details.it>summary::-webkit-details-marker{display:none}
+details.it>summary::before{content:'›';color:var(--mute);font-size:18px;width:10px;transition:transform .15s}
+details.it[open]>summary::before{transform:rotate(90deg)}
+details.it[open]>summary{border-bottom:1px solid var(--line)}
+.sm{flex:1;min-width:0}
+.sm .t{font-weight:700}
+.sm .d{color:var(--mute);font-size:12.5px;margin-top:1px}
+.nr{text-align:right;white-space:nowrap}
+.nr b{font-size:15px}
+.nr small{color:var(--mute);font-size:11.5px;display:block}
+.in{padding:4px 14px 10px}
+.in details.it{border-radius:10px;margin:8px 0;background:var(--zebra)}
+.in details.it>summary{padding:9px 12px}
+table{border-collapse:collapse;width:100%}
+th{font-size:11.5px;color:var(--mute);font-weight:600;text-align:left;padding:6px;border-bottom:1px solid var(--line)}
+td{padding:6px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:top}
+tr:last-child td{border-bottom:0}
+.r{text-align:right;white-space:nowrap}
+.mu{color:var(--mute);font-size:12px}
+.bar{height:5px;background:var(--soft);border-radius:3px;margin-top:5px;max-width:240px}
+.bar div{height:100%;background:var(--brand);border-radius:3px}
+.note{background:#fff8e1;border:1px solid #f3e2a6;border-radius:10px;padding:10px 12px;color:#5b4a14;font-size:12.5px;margin-top:14px;line-height:1.45}
+.err{background:#fdecea;color:#b42318;border-radius:10px;padding:12px;margin:14px 0}
+.out{display:flex;gap:8px;justify-content:center;margin-top:14px}
+.spin{width:34px;height:34px;border:3px solid var(--soft);border-top-color:var(--brand);border-radius:50%;margin:60px auto;animation:g 1s linear infinite}
+@keyframes g{to{transform:rotate(360deg)}}
+</style>
+<script src="config.js"></script>
+<script src="sb.js"></script>
+</head>
+<body>
+<div id="app"><div class="spin"></div></div>
+<script>
+const $app = document.getElementById('app');
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const E = { datos:null, fechas:[], per:'dia', dia:'', vista:'doc', q:'' };
+const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+const DSEM = ['dom','lun','mar','mié','jue','vie','sáb'];
+const fDia = iso => { const d = new Date(iso+'T12:00:00'); return `${DSEM[d.getDay()]} ${d.getDate()} ${MESES[d.getMonth()]}`; };
+const fN = n => Math.round(n||0).toLocaleString('es-CO');
+const casaCorta = c => String(c||'').split(/[,(]/)[0].trim() || c;
+const plural = (n, s, p) => fN(n) + ' ' + (n === 1 ? s : (p || s + 's'));
+
+async function cargar(){
+  $app.innerHTML = '<div class="spin"></div>';
+  try {
+    const d = await GuivalSB.rpc('entradas_datos', {});
+    if (!d) throw new Error('Su usuario no tiene acceso a Entradas a bodega. Pídaselo a Nestor.');
+    const C = d.cols, ix = k => C.indexOf(k);
+    d.filas = d.filas.map(r => ({ fecha:String(r[ix('fecha')]).slice(0,10), doc:r[ix('documento')], ref:r[ix('referencia')], art:r[ix('articulo')]||r[ix('referencia')],
+      pacas:+r[ix('pacas')]||0, casa:r[ix('casa')]||'Sin casa', grupo:r[ix('grupo')]||'', saldo:r[ix('saldo')] }));
+    E.datos = d;
+    E.fechas = [...new Set(d.filas.map(f=>f.fecha))].sort();
+    if (!E.dia || E.fechas.indexOf(E.dia) < 0) E.dia = E.fechas[E.fechas.length-1] || '';
+    render();
+  } catch(e){
+    let m = e.message || String(e);
+    if (/SIN_SESION/.test(m)) m = 'Su sesión en la base nueva venció. Salga de la app (botón Salir en Inicio) y vuelva a entrar con Google.';
+    $app.innerHTML = `<div class="wrap"><div class="err">${esc(m)}</div><div class="out"><button class="btn" data-e="recargar">Intentar de nuevo</button></div></div>`;
+  }
+}
+
+function render(){
+  const D = E.datos;
+  $app.innerHTML = `<div class="wrap">
+    <div class="tabs">${[['dia','Día'],['7','7 días'],['mes','Este mes'],['ant','Mes anterior'],['todo','Todo']]
+      .map(([k,l])=>`<button data-e="per" data-v="${k}" class="${E.per===k?'on':''}">${l}</button>`).join('')}</div>
+    <div id="nav"></div>
+    <div id="kpi" class="kpis"></div>
+    <input type="search" id="q" placeholder="Buscar producto, casa, referencia o documento (CM)…" value="${esc(E.q)}">
+    <div class="tabs" style="margin-bottom:10px">${[['doc','Documentos'],['casa','Casas'],['prod','Productos']]
+      .map(([k,l])=>`<button data-e="vista" data-v="${k}" class="${E.vista===k?'on':''}">${l}</button>`).join('')}</div>
+    <div id="body"></div>
+    <div class="note">Toque una casa, un documento o un producto para ver el detalle. <b>Saldo</b> = pacas de ese producto que quedaron en bodega (inventario del CIERRE) al terminar ese día, ya sumada la entrada. Se actualiza sola cada hora con el CIERRE.
+      ${D.ultimoArchivo?`<br>Último cierre leído: ${esc(D.ultimoArchivo)}${D.actualizado?' · '+esc(D.actualizado):''}.`:''}</div>
+    <div class="out"><button class="btn" data-e="recargar">Actualizar</button></div>
+  </div>`;
+  pintar();
+}
+
+function filtradas(){
+  const F = E.datos.filas, fx = E.fechas, ult = fx[fx.length-1] || '';
+  let ok;
+  if (E.per === 'dia') ok = f => f.fecha === E.dia;
+  else if (E.per === '7'){ const set = new Set(fx.slice(Math.max(0, fx.length-7))); ok = f => set.has(f.fecha); }
+  else if (E.per === 'mes') ok = f => f.fecha.slice(0,7) === ult.slice(0,7);
+  else if (E.per === 'ant'){ const d = new Date(ult.slice(0,7)+'-15T12:00:00'); d.setMonth(d.getMonth()-1); const m = d.toISOString().slice(0,7); ok = f => f.fecha.slice(0,7) === m; }
+  else ok = () => true;
+  const q = E.q.trim().toLowerCase();
+  return F.filter(f => ok(f) && (!q || (f.art+' '+f.ref+' '+f.casa+' '+f.doc+' '+f.grupo).toLowerCase().includes(q)));
+}
+
+const agrupar = (F, key) => { const m = new Map(); F.forEach(f => { const k = key(f); const o = m.get(k) || {k, filas:[], pacas:0}; o.filas.push(f); o.pacas += f.pacas; m.set(k, o); }); return [...m.values()]; };
+const cuenta = (F, k) => new Set(F.map(f => f[k])).size;
+
+// Tabla de referencias de un documento
+const tablaRefs = filas => `<table><tr><th>Ref.</th><th>Producto</th><th class="r">Pacas</th><th class="r">Saldo</th></tr>
+  ${filas.slice().sort((a,b)=>b.pacas-a.pacas).map(f=>`<tr><td>${esc(f.ref)}</td><td>${esc(f.art)}</td><td class="r">${fN(f.pacas)}</td><td class="r">${f.saldo==null?'–':fN(f.saldo)}</td></tr>`).join('')}</table>`;
+
+// Un documento (fecha + CM) que se abre para ver sus referencias
+function docHtml(g, abierto, conCasa){
+  const f0 = g.filas[0], cs = [...new Set(g.filas.map(f=>casaCorta(f.casa)))];
+  return `<details class="it" ${abierto?'open':''}><summary>
+      <div class="sm"><div class="t">${esc(f0.doc)} <span class="mu">· ${fDia(f0.fecha)}</span></div>
+        <div class="d">${conCasa?esc(cs.join(', '))+' · ':''}${plural(g.filas.length,'referencia')}</div></div>
+      <div class="nr"><b>${fN(g.pacas)}</b><small>pacas</small></div></summary>
+    <div class="in">${tablaRefs(g.filas)}</div></details>`;
+}
+const porDoc = F => agrupar(F, f => f.fecha+'|'+f.doc).sort((a,b)=>b.k.localeCompare(a.k));
+
+function pintar(){
+  const nav = document.getElementById('nav'), kp = document.getElementById('kpi'), body = document.getElementById('body');
+  if (!body) return;
+  const fx = E.fechas;
+  if (!fx.length){ body.innerHTML = '<div class="note">Todavía no hay entradas cargadas. Cuando llegue el próximo CIERRE se cargan solas.</div>'; return; }
+  if (E.per === 'dia'){
+    const i = fx.indexOf(E.dia);
+    nav.innerHTML = `<div class="row" style="justify-content:center;gap:14px;margin-top:10px">
+      <button class="btn" data-e="dia" data-v="-1" ${i<=0?'disabled style="opacity:.4"':''}>‹</button>
+      <b style="min-width:120px;text-align:center">${fDia(E.dia)}</b>
+      <button class="btn" data-e="dia" data-v="1" ${i>=fx.length-1?'disabled style="opacity:.4"':''}>›</button></div>`;
+  } else nav.innerHTML = '';
+
+  const F = filtradas();
+  const pac = F.reduce((s,f)=>s+f.pacas,0), dias = cuenta(F,'fecha'), ncas = cuenta(F,'casa');
+  kp.innerHTML = `
+    <div class="kpi"><small>Pacas recibidas</small><b>${fN(pac)}</b><i>${E.per==='dia'?'en el día':plural(dias,'día')+' con entradas'}</i></div>
+    <div class="kpi"><small>Referencias</small><b>${fN(cuenta(F,'ref'))}</b><i>productos distintos</i></div>
+    <div class="kpi"><small>Documentos de compra</small><b>${fN(cuenta(F,'doc'))}</b><i>${plural(ncas,'casa')}</i></div>`;
+  if (!F.length){ body.innerHTML = '<div class="card" style="padding:14px;color:var(--mute)">No hay entradas para este filtro.</div>'; return; }
+
+  if (E.vista === 'doc'){
+    const gs = porDoc(F), abrir = gs.length <= 6;
+    let ant = '';
+    body.innerHTML = gs.map(g => {
+      const fe = g.filas[0].fecha, sep = E.per !== 'dia' && fe !== ant ? `<div class="sec">${fDia(fe)}</div>` : ''; ant = fe;
+      return sep + docHtml(g, abrir, true);
+    }).join('');
+  }
+  else if (E.vista === 'casa'){
+    const gs = agrupar(F, f=>f.casa).sort((a,b)=>b.pacas-a.pacas), max = gs[0].pacas || 1, solo = gs.length === 1;
+    body.innerHTML = gs.map(g => {
+      const docs = porDoc(g.filas);
+      return `<details class="it" ${solo?'open':''}><summary>
+          <div class="sm"><div class="t">${esc(casaCorta(g.k))}</div>
+            <div class="d">${plural(docs.length,'documento')} · ${plural(cuenta(g.filas,'ref'),'referencia')} · ${(g.pacas/pac*100).toFixed(0)}%</div>
+            <div class="bar"><div style="width:${(g.pacas/max*100).toFixed(1)}%"></div></div></div>
+          <div class="nr"><b>${fN(g.pacas)}</b><small>pacas</small></div></summary>
+        <div class="in">${docs.map(d => docHtml(d, false, false)).join('')}</div></details>`;
+    }).join('');
+  }
+  else {
+    const gs = agrupar(F, f=>f.ref).sort((a,b)=>b.pacas-a.pacas);
+    body.innerHTML = gs.map(g => {
+      const ord = g.filas.slice().sort((a,b)=>(b.fecha+b.doc).localeCompare(a.fecha+a.doc)), u = ord[0];
+      return `<details class="it"><summary>
+          <div class="sm"><div class="t">${esc(u.art)}</div>
+            <div class="d">${esc(g.k)} · ${esc(casaCorta(u.casa))} · ${plural(g.filas.length,'entrada')} · últ. ${fDia(u.fecha)}</div></div>
+          <div class="nr"><b>${fN(g.pacas)}</b><small>saldo ${u.saldo==null?'–':fN(u.saldo)}</small></div></summary>
+        <div class="in"><table><tr><th>Fecha</th><th>Documento</th><th class="r">Pacas</th><th class="r">Saldo</th></tr>
+          ${ord.map(f=>`<tr><td>${fDia(f.fecha)}</td><td>${esc(f.doc)}</td><td class="r">${fN(f.pacas)}</td><td class="r">${f.saldo==null?'–':fN(f.saldo)}</td></tr>`).join('')}
+        </table></div></details>`;
+    }).join('');
+  }
+}
+
+$app.addEventListener('click', e => {
+  const b = e.target.closest('[data-e]'); if (!b || b.disabled) return;
+  const a = b.dataset.e, v = b.dataset.v;
+  if (a === 'per'){ E.per = v; if (v === 'dia') E.dia = E.fechas[E.fechas.length-1] || ''; render(); }
+  else if (a === 'vista'){ E.vista = v; render(); }
+  else if (a === 'dia'){ const i = E.fechas.indexOf(E.dia) + (+v); if (i >= 0 && i < E.fechas.length){ E.dia = E.fechas[i]; pintar(); } }
+  else if (a === 'recargar') cargar();
+});
+$app.addEventListener('input', e => {
+  if (e.target.id !== 'q') return;
+  E.q = e.target.value; clearTimeout(E._t); E._t = setTimeout(pintar, 200);
+});
+cargar();
+</script>
+</body>
+</html>

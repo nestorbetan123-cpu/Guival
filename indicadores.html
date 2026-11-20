@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Indicadores de ventas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@500;600;700&display=swap">
+<style>
+/* Indicadores de ventas – pantalla propia de la App Guival (antes IndicadoresPagina de Apps Script).
+   Datos: base nueva (Supabase, función mis_indicadores). Colores del módulo Ventas: azul y blanco. */
+:root{
+  --bg:#f3f5f9; --surface:#ffffff; --ink:#0d1b3a; --muted:#5c6782; --line:#dde2ec; --zebra:#f6f8fb;
+  --accent:#001f60; --accent-soft:#e8edf7; --chip:#eef1f6;
+  --ok:#1a7f37; --warn:#a8670f; --bad:#c62828;
+  --font:'Archivo',system-ui,-apple-system,'Segoe UI',sans-serif; --narrow:'Archivo Narrow','Arial Narrow',system-ui,sans-serif;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;margin:0;-webkit-text-size-adjust:100%}
+.wrap{padding:0 16px;max-width:1100px;margin:0 auto}
+header{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.hrow{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-top:14px}
+h1{font-size:19px;margin:0;font-weight:700}
+.corte{color:var(--muted);font-size:12.5px;white-space:nowrap}
+.tabs{display:flex;gap:6px;padding:12px 0;overflow-x:auto;scrollbar-width:none}
+.tabs button{font:600 13.5px var(--font);border:1px solid var(--line);background:var(--chip);color:var(--ink);border-radius:999px;padding:8px 14px;white-space:nowrap;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+main.wrap{padding-top:14px;padding-bottom:40px}
+.meta{display:flex;flex-wrap:wrap;gap:6px 16px;color:var(--muted);font-size:12.5px;margin:0 0 12px}
+.meta b{color:var(--ink);font-weight:600}
+.grid{display:grid;gap:14px}
+@media(min-width:900px){.grid.two{grid-template-columns:1fr 1fr;align-items:start}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px}
+.card h2{font-size:15.5px;margin:0 0 2px}
+.card .sub{color:var(--muted);font-size:12px;margin:0 0 10px}
+.num{font-family:var(--narrow);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+table{border-collapse:collapse;width:100%}
+th{font:600 11.5px var(--font);color:var(--muted);text-align:left;padding:6px 6px;border-bottom:1px solid var(--line)}
+th.num{text-align:right}
+td{padding:6px 6px;border-bottom:1px solid var(--line);font-size:13.5px}
+tr:last-child td{border-bottom:0}
+.emp td:first-child{color:var(--muted)}
+.emp tr.fuerte td{font-weight:700}
+.emp tr.fuerte td:first-child{color:var(--ink)}
+.emp td.num{font-size:15px}
+.emp .ct{display:none}
+@media(max-width:600px){.emp .lg{display:none}.emp .ct{display:inline}.emp td,.emp th{padding:7px 4px}.emp td.num{font-size:14px}.emp td:first-child{font-size:12.5px}}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.kpi{background:var(--zebra);border-radius:10px;padding:10px}
+.kpi .l{font-size:11.5px;color:var(--muted)}
+.kpi .v{font:700 19px var(--narrow);margin-top:2px}
+.kpi .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+@media(max-width:420px){.kpi .v{font-size:16px}}
+.dias td{font-size:13px;padding:5px 6px}
+.dias tr.nohab td{background:var(--zebra);color:var(--muted)}
+.dias tr.nohab.conventa td.num{color:var(--ink)}
+.dias tr.hoy td{background:var(--accent-soft);font-weight:700}
+.dias tr.fut td{color:var(--muted)}
+.dias .nota{font-size:11.5px;color:var(--muted)}
+.dias td.h{color:var(--muted);text-align:center;width:34px}
+.ley{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11.5px;color:var(--muted);margin:0 0 10px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:0}
+.ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+.d-ok{background:var(--ok)} .d-warn{background:var(--warn)} .d-bad{background:var(--bad)}
+.rk{list-style:none;margin:0;padding:0}
+.rk li{display:grid;grid-template-columns:26px 1fr auto;gap:2px 8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+.rk li:last-child{border-bottom:0}
+.rk .p{font-size:11.5px;color:var(--muted);text-align:right}
+.rk .n{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rk .pc{font:700 15px var(--narrow);text-align:right}
+.rk .bar{grid-column:2/4;height:5px;background:var(--chip);border-radius:3px;overflow:hidden;position:relative}
+.rk .bar i{display:block;height:100%;border-radius:3px}
+.rk .bar b{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--ink);opacity:.45}
+.rk .mt{grid-column:2/4;font-size:11.5px;color:var(--muted)}
+.rk li.yo .n{color:var(--accent);font-weight:700}
+.tot{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
+.tot b{color:var(--ink)}
+.nota-pie{font-size:11.5px;color:var(--muted);margin-top:10px}
+.msg{max-width:440px;margin:48px auto;text-align:center;color:var(--muted)}
+.msg h2{color:var(--ink);font-size:17px}
+.carga{height:120px;border-radius:12px;background:linear-gradient(90deg,var(--surface),var(--zebra),var(--surface));background-size:200% 100%;animation:sh 1.2s infinite linear;border:1px solid var(--line)}
+@keyframes sh{to{background-position:-200% 0}}
+button.rec{font:600 13px var(--font);background:none;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 12px;margin-top:10px;cursor:pointer}
+</style>
+<script src="config.js"></script>
+<script src="sb.js"></script>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="hrow"><h1>Indicadores de ventas</h1><span class="corte" id="corte"></span></div>
+    <nav class="tabs" id="tabs" role="tablist" hidden></nav>
+  </div>
+</header>
+<main class="wrap" id="main">
+  <div class="grid"><div class="carga"></div><div class="carga"></div></div>
+</main>
+<script>
+(function(){
+  var R = null, actual = null;
+  var $ = function(id){ return document.getElementById(id); };
+  var esc = function(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
+  var nf = new Intl.NumberFormat('es-CO', {maximumFractionDigits:0});
+  var M = function(v){ return v == null ? '—' : (v < 0 ? '-$ ' : '$ ') + nf.format(Math.abs(Math.round(v))); };
+  var Mc = function(v){
+    if (v == null) return '—';
+    var a = Math.abs(v), s = a >= 1e6 ? (a/1e6).toLocaleString('es-CO',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' M' : nf.format(a);
+    return (v < 0 ? '-$ ' : '$ ') + s; };
+  var Mm = function(v){ return v == null ? '—' : (v < 0 ? '-' : '') + (Math.abs(v)/1e6).toLocaleString('es-CO',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' M'; };
+  var P = function(v){ return v == null ? '—' : (v*100).toFixed(1).replace('.', ',') + '%'; };
+  var DS = ['dom','lun','mar','mié','jue','vie','sáb'];
+  var MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  var fFecha = function(f){ var p = f.split('-'); return +p[2] + ' de ' + MESES[+p[1]-1] + ' de ' + p[0]; };
+  var fDia = function(f){ var p = f.split('-'), d = new Date(+p[0], +p[1]-1, +p[2]); return DS[d.getDay()] + ' ' + p[2]; };
+  var sem = function(p){ return p >= R.debemosColchon ? 'ok' : (p >= R.debemos ? 'warn' : 'bad'); };
+  var NOMBRE = { empresa:'Venta empresa', mayoristas:'Mayoristas', tat:'TAT' };
+
+  function error(m){
+    if (/SIN_SESION/.test(m)) m = 'Su sesión en la base nueva venció. Salga de la app (botón Salir en Inicio) y vuelva a entrar con Google.';
+    $('main').innerHTML = '<div class="msg"><h2>No se pudieron cargar los indicadores</h2><p>' + esc(m) + '</p><button class="rec" onclick="location.reload()">Intentar de nuevo</button></div>';
+  }
+
+  function cargar(){
+    GuivalSB.rpc('mis_indicadores').then(function(r){
+      if (!r) return error('Su usuario no tiene acceso a Indicadores. Pídaselo a Nestor.');
+      if (r.error) return error(r.error);
+      R = r;
+      var guardado = null; try { guardado = localStorage.getItem('ind_tab'); } catch(e) {}
+      actual = r.canales.indexOf(guardado) >= 0 ? guardado : r.canales[0];
+      $('corte').textContent = 'Cierre ' + fDia(r.fecha) + (r.corte ? ' · ' + r.corte : '');
+      pintarTabs(); pintar();
+    }).catch(function(e){ error(String(e && e.message || e)); });
+  }
+
+  function pintarTabs(){
+    var t = $('tabs');
+    if (R.canales.length < 2) { t.hidden = true; return; }
+    t.hidden = false;
+    t.innerHTML = R.canales.map(function(c){ return '<button role="tab" data-c="' + c + '" aria-selected="' + (c === actual) + '">' + NOMBRE[c] + '</button>'; }).join('');
+    t.onclick = function(ev){
+      var b = ev.target.closest('button'); if (!b) return;
+      actual = b.getAttribute('data-c'); try { localStorage.setItem('ind_tab', actual); } catch(e) {}
+      [].forEach.call(t.children, function(x){ x.setAttribute('aria-selected', x === b); });
+      pintar(); window.scrollTo(0, 0);
+    };
+  }
+
+  function meta(){
+    return '<div class="meta"><span><b>' + R.habTrans + '</b> de <b>' + R.habMes + '</b> días hábiles</span>' +
+      '<span>Debemos ir al <b>' + P(R.debemosColchon) + '</b> con colchón · <b>' + P(R.debemos) + '</b> días completos</span></div>';
+  }
+
+  function pintar(){
+    var h = meta();
+    if (actual === 'empresa') h += empresa();
+    else h += '<div class="grid two">' + diaria(actual) + cumplimiento(actual) + '</div>';
+    $('main').innerHTML = h;
+  }
+
+  function empresa(){
+    var G = R.empresa, cols = ['mayoristas','tat','total'];
+    var filas = [
+      ['Venta del día','dia',M,true], ['Acumulado del mes','acum',M,true],
+      ['Proyección con colchón (' + R.habColchon + ' d)','proyColchon',M,true],
+      ['Proyección días completos (' + R.habMes + ' d)','proy',M,false],
+      ['Cuota del mes','cuota',M,false], ['Vamos al','vamos',P,true],
+      ['Proy. con colchón vs cuota','pctProyColchon',P,false]];
+    var T = G.total;
+    var k = '<div class="kpis">' +
+      '<div class="kpi"><div class="l">Venta del día</div><div class="v">' + Mc(T.dia) + '</div><div class="s">Mayoristas + TAT</div></div>' +
+      '<div class="kpi"><div class="l">Acumulado</div><div class="v ' + sem(T.vamos) + '">' + P(T.vamos) + '</div><div class="s">' + Mc(T.acum) + ' de ' + Mc(T.cuota) + '</div></div>' +
+      '<div class="kpi"><div class="l">Cierre con colchón</div><div class="v">' + Mc(T.proyColchon) + '</div><div class="s">' + P(T.pctProyColchon) + ' de la cuota</div></div></div>';
+    return '<div class="card emp"><h2>Venta empresa</h2><p class="sub">' + esc(R.notaDia || ('Al ' + fFecha(R.fecha))) + '</p>' + k +
+      '<div style="overflow-x:auto"><table><thead><tr><th></th><th class="num">Mayoristas</th><th class="num">TAT</th><th class="num">Total</th></tr></thead><tbody>' +
+      filas.map(function(f){
+        return '<tr' + (f[3] ? ' class="fuerte"' : '') + '><td>' + f[0] + '</td>' + cols.map(function(c){
+          var g = G[c], v = g[f[1]], cl = '';
+          if (f[1] === 'vamos') cl = sem(v);
+          if (f[1] === 'pctProyColchon') cl = v >= 1 ? 'ok' : (g.pctProy >= 1 ? 'warn' : 'bad');
+          var txt = f[2] === M ? '<span class="lg">' + M(v) + '</span><span class="ct">' + Mm(v) + '</span>' : f[2](v);
+          return '<td class="num ' + cl + '">' + txt + '</td>';
+        }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<p class="nota-pie">En celular las cifras van en millones (M). Cuota mayoristas fija; cuota TAT = cuota por zona × zonas del mes.</p></div>';
+  }
+
+  function diaria(c){
+    var D = R[c].dias, ult = null;
+    D.forEach(function(d){ if (!d.futuro) ult = d; });
+    var p = R.fecha.split('-');
+    var h = '<div class="card"><h2>Venta diaria ' + NOMBRE[c].toLowerCase().replace('tat','TAT') + '</h2>' +
+      '<p class="sub">' + MESES[+p[1]-1].replace(/^./, function(x){return x.toUpperCase();}) + ' ' + p[0] +
+      (ult ? ' · acumulado ' + M(ult.acum) : '') + '</p>' +
+      '<table class="dias"><thead><tr><th>Día</th><th style="text-align:center">Háb.</th><th class="num">Venta</th><th class="num">Acumulado</th></tr></thead><tbody>';
+    D.forEach(function(d){
+      var cls = [];
+      if (d.habil == null) cls.push('nohab'); if (d.venta) cls.push('conventa');
+      if (d.fecha === R.fecha) cls.push('hoy'); else if (d.futuro) cls.push('fut');
+      h += '<tr class="' + cls.join(' ') + '"><td>' + fDia(d.fecha) + (d.nota ? ' <span class="nota">' + esc(d.nota) + '</span>' : '') + '</td>' +
+        '<td class="h">' + (d.habil == null ? '' : d.habil) + '</td>' +
+        '<td class="num">' + (d.futuro ? '' : (d.venta == null ? '—' : M(d.venta))) + '</td>' +
+        '<td class="num">' + (d.futuro ? '' : M(d.acum)) + '</td></tr>';
+    });
+    return h + '</tbody></table><p class="nota-pie">Los sábados no cuentan como día hábil, pero su venta sí suma.</p></div>';
+  }
+
+  function cumplimiento(c){
+    var L = R[c].cumplimiento, yo = (R.nombre || '').toUpperCase();
+    var h = '<div class="card"><h2>Cumplimiento ' + NOMBRE[c].replace('Mayoristas','mayoristas') + '</h2>' +
+      '<p class="sub">Acumulado al ' + fFecha(R.fecha) + (R.corte ? ' (corte ' + esc(R.corte) + ')' : '') + ' · ' + L.length + ' vendedores</p>' +
+      '<div class="ley"><span><i class="dot d-ok"></i>≥ ' + P(R.debemosColchon) + ' con colchón</span><span><i class="dot d-warn"></i>≥ ' + P(R.debemos) + ' días completos</span><span><i class="dot d-bad"></i>atrasado</span></div><ol class="rk">';
+    var tv = 0, tc = 0;
+    L.forEach(function(v, i){
+      var s = sem(v.pct), w = Math.min(100, v.pct * 100), meta = Math.min(100, R.debemosColchon * 100);
+      if (v.venta != null) { tv += v.venta; tc += v.cuota || 0; }
+      var mio = yo && yo.indexOf(String(v.nombre).replace(/^T\.\s*/, '').toUpperCase()) >= 0;
+      h += '<li' + (mio ? ' class="yo"' : '') + '><span class="p">' + (i + 1) + '</span><span class="n">' + esc(v.nombre) + '</span><span class="pc ' + s + '">' + P(v.pct) + '</span>' +
+        '<span class="bar"><i class="d-' + s + '" style="width:' + w + '%"></i><b style="left:' + meta + '%"></b></span>' +
+        (v.venta != null ? '<span class="mt">' + M(v.venta) + ' de ' + M(v.cuota) + '</span>' : '') + '</li>';
+    });
+    h += '</ol>';
+    if (R.montos && tc) h += '<div class="tot"><span>Total con cuota</span><span><b>' + M(tv) + '</b> de ' + M(tc) + ' · <b class="' + sem(tv / tc) + '">' + P(tv / tc) + '</b></span></div>';
+    return h + '<p class="nota-pie">La raya en cada barra marca dónde deberíamos ir hoy (con colchón).</p></div>';
+  }
+
+  cargar();
+})();
+</script>
+</body>
+</html>
