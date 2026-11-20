@@ -79,6 +79,7 @@ grant  execute on function public.dash_parte(text, text) to authenticated;
 --                   reemplaza las copias de ese mes (borra las de llaves que ya no existen)
 create or replace function public.robot_dash(llave text, tipo text, datos jsonb) returns int
 language plpgsql security definer set search_path = public as $$
+#variable_conflict use_variable
 declare n int := 0;
 begin
   if not app.robot_ok(llave) then raise exception 'llave de robot no válida'; end if;
