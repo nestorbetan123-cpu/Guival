@@ -16,11 +16,12 @@ begin
     select x->>0, x->>1, x->>2, coalesce(x->>3, ''), coalesce((x->>4)::boolean, false) from jsonb_array_elements(datos) x
     on conflict (clave) do nothing;
     get diagnostics n = row_count; return n;
-  elsif tipo = 'parte' then
-    delete from dash_partes where mes = datos->>'mes' and not (datos->'partes' ? dash_partes.llave);
-    insert into dash_partes(mes, llave, ver, datos)
-    select datos->>'mes', e.key, datos->>'ver', e.value from jsonb_each(datos->'partes') e
+  elsif tipo = 'parte' then          -- una copia: {"mes","ver","llave","parte":{m,n,docs,z}}
+    insert into dash_partes(mes, llave, ver, datos) values (datos->>'mes', datos->>'llave', datos->>'ver', datos->'parte')
     on conflict on constraint dash_partes_pkey do update set ver = excluded.ver, datos = excluded.datos;
+    return 1;
+  elsif tipo = 'limpiar' then        -- {"mes","llaves":[...]}: borra las copias de llaves que ya no existen
+    delete from dash_partes where mes = datos->>'mes' and not (datos->'llaves' ? dash_partes.llave);
     get diagnostics n = row_count; return n;
   end if;
   raise exception 'tipo desconocido: %', tipo;

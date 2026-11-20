@@ -26,9 +26,10 @@ function sbDash_(todo, ms) {
     var ver = (dims.parts && dims.parts[mes]) || '';
     if (hechos[mes] === ver + '|' + firma) return;
     if (Date.now() - t0 > (ms || 4.5 * 60 * 1000)) return;            // lo que falte, en la siguiente pasada
-    var partes = {};
-    Object.keys(llaves).forEach(function (ll) { partes[ll] = parteParaAcc_(llaves[ll], mes); });
-    sbRobot_('robot_dash', { tipo: 'parte', datos: { mes: mes, ver: ver, partes: partes } });
+    Object.keys(llaves).forEach(function (ll) {
+      sbRobot_('robot_dash', { tipo: 'parte', datos: { mes: mes, ver: ver, llave: ll, parte: parteParaAcc_(llaves[ll], mes) } });
+    });
+    sbRobot_('robot_dash', { tipo: 'limpiar', datos: { mes: mes, llaves: Object.keys(llaves) } });
     hechos[mes] = ver + '|' + firma; n++;
     props.setProperty('SB_DASH_VER', JSON.stringify(hechos));
   });

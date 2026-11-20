@@ -75,8 +75,8 @@ grant  execute on function public.dash_parte(text, text) to authenticated;
 -- Lo que llama el robot de Guival Maestros.
 --   tipo 'dims'   : datos = {"dims": "<texto de dims.json>"}
 --   tipo 'llaves' : datos = [[clave, llave, tipo, etiqueta, como], ...]  (reemplaza todo)
---   tipo 'parte'  : datos = {"mes": "2026-11", "ver": "...", "partes": {"<llave>": {m,n,docs,z}, ...}}
---                   reemplaza las copias de ese mes (borra las de llaves que ya no existen)
+--   tipo 'parte'  : una copia de un mes para una llave (de a una, para no pasar el tiempo máximo)
+--   tipo 'limpiar': borra las copias de un mes cuyas llaves ya no existen
 create or replace function public.robot_dash(llave text, tipo text, datos jsonb) returns int
 language plpgsql security definer set search_path = public as $$
 #variable_conflict use_variable
@@ -95,11 +95,12 @@ begin
     select x->>0, x->>1, x->>2, coalesce(x->>3, ''), coalesce((x->>4)::boolean, false) from jsonb_array_elements(datos) x
     on conflict (clave) do nothing;
     get diagnostics n = row_count; return n;
-  elsif tipo = 'parte' then
-    delete from dash_partes where mes = datos->>'mes' and not (datos->'partes' ? dash_partes.llave);
-    insert into dash_partes(mes, llave, ver, datos)
-    select datos->>'mes', e.key, datos->>'ver', e.value from jsonb_each(datos->'partes') e
+  elsif tipo = 'parte' then          -- una copia: {"mes","ver","llave","parte":{m,n,docs,z}}
+    insert into dash_partes(mes, llave, ver, datos) values (datos->>'mes', datos->>'llave', datos->>'ver', datos->'parte')
     on conflict on constraint dash_partes_pkey do update set ver = excluded.ver, datos = excluded.datos;
+    return 1;
+  elsif tipo = 'limpiar' then        -- {"mes","llaves":[...]}: borra las copias de llaves que ya no existen
+    delete from dash_partes where mes = datos->>'mes' and not (datos->'llaves' ? dash_partes.llave);
     get diagnostics n = row_count; return n;
   end if;
   raise exception 'tipo desconocido: %', tipo;
