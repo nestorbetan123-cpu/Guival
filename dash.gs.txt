@@ -20,9 +20,9 @@ function sbDash_(todo, ms) {
   // Meses: solo los que cambiaron desde la última subida (o todos).
   var props = PropertiesService.getScriptProperties();
   var hechos = todo ? {} : JSON.parse(props.getProperty('SB_DASH_VER') || '{}');
-  var firma = Object.keys(llaves).sort().join(',');
+  var firma = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, JSON.stringify(filas))).slice(0, 10);
   var t0 = Date.now(), n = 0;
-  (dims.meses || []).forEach(function (mes) {
+  (dims.meses || []).slice().reverse().forEach(function (mes) {   // el mes actual primero
     var ver = (dims.parts && dims.parts[mes]) || '';
     if (hechos[mes] === ver + '|' + firma) return;
     if (Date.now() - t0 > (ms || 4.5 * 60 * 1000)) return;            // lo que falte, en la siguiente pasada
