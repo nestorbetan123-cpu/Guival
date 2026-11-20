@@ -281,9 +281,12 @@ PANTALLAS.externa = async t => {
   }
   // Indicadores y Entradas: pantallas propias que leen de la base nueva (Supabase). Si la persona todavía no tiene
   // sesión en la base nueva (entró antes del cambio) o el administrador está en "Ver como", se abre la pantalla anterior.
-  const NUEVAS = { indicadores:'indicadores.html?v=1', ingresos:'entradas.html?v=1' };
-  if (perfilActivo().usuario.superadmin) NUEVAS.recibo = 'cartera.html?v=3';   // Informe de Cartera nuevo: en prueba (solo Nestor) hasta aprobarlo
-  if (NUEVAS[t.id] && !DEMO && !state.verComo && window.GuivalSB && GuivalSB.tiene()){
+  const NUEVAS = { indicadores:'indicadores.html?v=1', ingresos:'entradas.html?v=1', recibo:'cartera.html?v=4' };
+  // El Informe de Cartera ya solo existe en la base nueva: sin sesión nueva no se abre el anterior (quedaría en dos sitios).
+  if (t.id === 'recibo' && !DEMO && !(window.GuivalSB && GuivalSB.tiene())){
+    $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="card"><b>Falta un paso</b><p>El Informe de Cartera cambió a la versión nueva. Para abrirlo, cierre sesión y vuelva a entrar con su cuenta de Google (solo una vez).</p><button class="btn" data-logout>Cerrar sesión y volver a entrar</button></div></div>`; return;
+  }
+  if (NUEVAS[t.id] && !DEMO && (!state.verComo || t.id === 'recibo') && window.GuivalSB && GuivalSB.tiene()){
     $app.innerHTML = barra(t.nombre, true) + `<iframe src="${NUEVAS[t.id]}" title="${esc(t.nombre)}" class="embed"></iframe>`; return;
   }
   try { url = (await api('abrir', {herramienta: t.id, ...extra})).url; }
