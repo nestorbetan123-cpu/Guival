@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Informe de Cartera</title>
+<script src="config.js"></script>
+<script src="sb.js"></script>
+<style>
+:root{--brand:#006634;--ink:#1c2430;--mute:#667085;--line:#d5dbe3;--soft:#eef2f5;--bg:#f3f5f7}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;font-size:15px}
+.wrap{max-width:900px;margin:0 auto;padding:14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.btn{background:#fff;border:1px solid var(--brand);color:var(--brand);border-radius:10px;padding:12px;font-weight:600;font-size:15px}
+button{cursor:pointer;font:inherit}
+.spin{width:34px;height:34px;margin:40px auto;border:4px solid #cfe3d8;border-top-color:var(--brand);border-radius:50%;animation:g 1s linear infinite}@keyframes g{to{transform:rotate(360deg)}}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);max-width:92%;padding:12px 18px;border-radius:10px;color:#fff;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.25);display:none;z-index:99}
+</style></head>
+<body><div id="app"></div><div id="toast"></div>
+<script>
+
+/* Informe de Cartera – pantalla propia de la App Guival (20/11/2026). Antes era InformeCartera de Apps Script.
+   Datos: base nueva (Supabase, funciones cartera_*). Novedad: el RECIBO es el grupo: un recibo puede tener varias
+   facturas y varias formas de pago (efectivo, cheque, transferencia, consignación); debe cuadrar para cerrar. */
+const $app = document.getElementById('app');
+const PANTALLAS = {};
+const state = {};
+let NIVEL = 0;
+const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const barra = () => '';
+const go = () => {};
+const nivelDe = () => NIVEL;
+const POR = (() => { try { return localStorage.getItem('guival_persona') || ''; } catch (e) { return ''; } })();   // asistente de ventas
+function aviso(msg, error) {
+  const t = document.getElementById('toast'); t.textContent = msg; t.style.background = error ? '#b42318' : '#006634'; t.style.display = 'block';
+  clearTimeout(aviso.t); aviso.t = setTimeout(() => t.style.display = 'none', error ? 6000 : 3000);
+}
+async function api(accion, req) {
+  accion = String(accion).replace(/^recibo\./, ''); req = req || {};
+  const R = (fn, b) => GuivalSB.rpc(fn, b).catch(e => { throw new Error(/SIN_SESION/.test(e.message) ? 'Su sesión venció. Salga de la app y vuelva a entrar con Google.' : e.message); });
+  const C = window.__conv;
+  switch (accion) {
+    case 'inicio': {
+      const u = await R('cartera_inicio');
+      if (!u) throw new Error('Su usuario no tiene acceso al Informe de Cartera. Pídaselo a Nestor.');
+      NIVEL = u.nivel || 0; const p = String(u.hoy).split('/'); u.hoyIso = p[2] + '-' + p[1] + '-' + p[0]; u.impresora = false;
+      if (!u.elige) { const v = u.vendedores[0].vendedor; u.lista = await R('cartera_lista', { v }) || []; u.tal = await R('cartera_tal_de', { v }); }
+      return u;
+    }
+    case 'tal_de': return R('cartera_tal_de', { v: req.vendedor });
+    case 'talonarios': return R('cartera_talonarios');
+    case 'tal_guardar': return R('cartera_tal_guardar', { t: req.t });
+    case 'tal_reasignar': return R('cartera_tal_reasignar', { p_id: req.id, p_vendedor: req.vendedor });
+    case 'tal_eliminar': return R('cartera_tal_eliminar', { p_id: req.id });
+    case 'pendientes': return (await R('cartera_pendientes')) || [];
+    case 'lista': return (await R('cartera_lista', { v: req.vendedor })) || [];
+    case 'informe': { const r = await R('cartera_informe', { p_id: req.id }); if (!r) throw new Error('No encontré el informe'); return C.aLineas(r); }
+    case 'reabrir': return C.aLineas(await R('cartera_reabrir', { p_id: req.id }));
+    case 'recibir': return C.aLineas(await R('cartera_recibir', { p_id: req.id, si: req.si !== false }));
+    case 'buscar': return (await R('cartera_buscar', { q: req.q })) || [];
+    case 'facturas': return (await R('cartera_facturas', { p_cod: req.cod, p_id: req.id || null })) || [];
+    case 'guardar': case 'cerrar': return R('cartera_guardar', { inf: C.aRecibos(req.inf), p_ver: req.ver || null, cerrar: accion === 'cerrar', por: POR });
+    case 'config': return R('cartera_config_guardar', { p_tarifa: Number(String(req.config.tarifa).replace(',', '.')), p_minimo: Number(String(req.config.minimo).replace(/[^\d]/g, '')) });
+  }
+  throw new Error('Acción desconocida');
+}
+</script>
+<script>
+
+
+function mcInformeImpreso_(inf, V, calc, usada) {
+  const E = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const mil = n => Math.abs(Math.round(n || 0)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const n0 = n => n ? (n < 0 ? '-' : '') + mil(n) : '';
+  const $p = n => (n < 0 ? '-' : '') + '$ ' + mil(n);
+  const TIPO = { 'Factura completa': 'FC', 'Contado': 'Con', 'Abono': 'A', 'Saldo': 'S' };
+  const FORMA = { 'Efectivo': 'Efect', 'Cheque': 'Cheq', 'Transferencia': 'Trans', 'Consignación': 'Consig' };
+  const corto = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+  const lin = (inf.lineas || []).filter(usada);
+  const C = lin.map(l => calc(l));
+  const t = { f: 0, rf: 0, ri: 0, ica: 0, dev: 0, dcto: 0 }, pf = { Efectivo: [0, 0], Cheque: [0, 0], Transferencia: [0, 0], 'Consignación': [0, 0] };
+  const kR = l => String(l.recibo || '').trim().toUpperCase(), sumR = {};
+  lin.forEach((l, k) => { if (!l.anulado) sumR[kR(l)] = (sumR[kR(l)] || 0) + C[k].rec; });
+  const PG = {}; Object.keys(sumR).forEach(k => { const ps = (inf.pagos || {})[k] || [];
+    PG[k] = ps.length === 1 && (ps[0].valor === '' || ps[0].valor == null) ? [Object.assign({}, ps[0], { valor: sumR[k] })] : ps.map(p => Object.assign({}, p, { valor: Number(String(p.valor).replace(/[^\d\-]/g, '')) || 0 })); });
+  Object.keys(PG).forEach(k => PG[k].forEach(p => { if (pf[p.forma]) { pf[p.forma][0] += p.valor; pf[p.forma][1]++; } }));
+  let contado = 0;
+  const vistas = {};   
+  lin.forEach((l, k) => { if (l.anulado) return; const c = C[k];
+    Object.keys(t).forEach(x => { if (x !== 'f') t[x] += c[x]; });
+    const kf = l.cod + '|' + String(l.factura || '').trim().toUpperCase(); if (!l.factura || !vistas[kf]) { t.f += c.f; vistas[kf] = 1; }
+    if (l.tipo === 'Contado') contado++; });
+  
+  const DED = [['rf', 'Ret. Fte.', 'Ret. Fte.'], ['ri', 'Ret. IVA', 'Ret. IVA'], ['ica', 'ICA', 'ICA'], ['dev', 'Devol.', 'Devoluciones'], ['dcto', 'Dcto.', 'Descuentos']]
+    .filter(d => C.some(c => c[d[0]]));
+  const total = pf.Efectivo[0] + pf.Cheque[0] + pf.Transferencia[0] + pf['Consignación'][0];
+  const yaR = {};
+  
+  const largo = Math.max(20, 40 - 3 * DED.length);
+  const yaVista = {};   
+  const letra = /norma|^n$/i.test(String(inf.empresa || '')) ? 'N' : 'G';
+  const filas = lin.map((l, k) => {
+    const c = C[k];
+    if (l.anulado) return `<tr><td class="cod"></td><td class="cli"><b>ANULADO</b></td><td></td><td></td><td class="cod">${E(l.recibo)}</td><td class="m"></td>${DED.map(() => '<td class="m"></td>').join('')}<td class="m"></td><td></td></tr>`;
+    const kf = l.cod + '|' + String(l.factura || '').trim().toUpperCase(), primera = !l.factura || !yaVista[kf]; yaVista[kf] = 1;
+    return `<tr${l.tipo === 'Contado' ? ' class="con"' : ''}><td class="cod">${E(l.cod)}</td><td class="cli">${E(corto(l.nombre, largo))}</td><td>${E(l.factura)}</td><td>${TIPO[l.tipo] || E(l.tipo)}</td><td class="cod">${E(l.recibo)}</td>` +
+      `<td class="m">${primera ? n0(c.f) : ''}</td>${DED.map(d => `<td class="m">${n0(c[d[0]])}</td>`).join('')}<td class="m b">${n0(c.rec)}</td><td>${yaR[kR(l)] ? '' : (yaR[kR(l)] = 1, [...new Set((PG[kR(l)] || []).map(p => FORMA[p.forma] || E(p.forma)))].join('+'))}</td></tr>`;
+  }).join('');
+  const caja = (titulo, valor, cls) => `<td${cls ? ' class="' + cls + '"' : ''}><span>${titulo}</span><b>${valor}</b></td>`;
+  return `<div class="inf">
+    <table class="enc"><tr><td><h1>INFORME DE CARTERA · RECIBOS ${letra}</h1></td><td class="der"><b>Del</b> ${E(inf.inicio)} <b>al</b> ${E(inf.cierre || '—')}</td></tr>
+      <tr><td><b>Vendedor:</b> ${E(inf.vendedor)} &nbsp; <b>Código:</b> ${E(V.codigo)} &nbsp; <b>Zona:</b> ${E(V.zona)}</td><td class="der peq">Informe ${E(inf.id)}</td></tr></table>
+    <table class="d"><thead><tr><th>Código</th><th>Cliente</th><th>Factura</th><th>Tipo</th><th>Recibo</th><th>Vr. factura</th>${DED.map(d => `<th>${d[1]}</th>`).join('')}<th>Vr. recibido</th><th>Forma</th></tr></thead>
+      <tbody>${filas}</tbody></table>
+    <table class="tot"><tr>${caja('Vr. facturas', $p(t.f))}${DED.map(d => caja(d[2], $p(t[d[0]]))).join('')}</tr></table>
+    <table class="tot"><tr>${caja('Efectivo', $p(pf.Efectivo[0]))}${caja('Cheques (' + pf.Cheque[1] + ')', $p(pf.Cheque[0]))}${caja('Transferencias (' + pf.Transferencia[1] + ')', $p(pf.Transferencia[0]))}${pf['Consignación'][1] ? caja('Consignaciones (' + pf['Consignación'][1] + ')', $p(pf['Consignación'][0])) : ''}${caja('TOTAL RECIBO', $p(total), 'gran')}</tr></table>
+    ${(() => { const det = Object.keys(PG).filter(k => PG[k].length > 1 || PG[k].some(p => p.banco || p.ref || p.forma !== 'Efectivo'));
+      return det.length ? `<table class="d" style="margin-top:5px"><thead><tr><th>Recibo</th><th>Forma de pago</th><th>Banco</th><th>Comprobante</th><th>Valor</th></tr></thead><tbody>${det.map(k => PG[k].map(p => `<tr><td class="cod">${E(k)}</td><td>${E(p.forma)}</td><td>${E(p.banco)}</td><td>${E(p.ref)}</td><td class="m">${n0(p.valor)}</td></tr>`).join('')).join('')}</tbody></table>` : ''; })()}
+    <p class="obs"><b>Observaciones:</b> ${E(inf.obs || '')}</p>
+    <table class="fir"><tr><td><span>Firma vendedor</span></td><td><span>Recibido por (Cartera)</span></td><td><span>${contado ? 'Vo.Bo. Gerencia – descuentos de contado (' + contado + ')' : 'Fecha de entrega'}</span></td></tr></table>
+  </div>`;
+}
+/** Estilos del informe impreso (solo negro sobre blanco). */
+const MC_CSS_IMPRESO = `
+.inf{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;font-size:8.5pt}
+.inf table{border-collapse:collapse;width:100%}
+.inf .enc td{padding:1px 2px;font-size:9pt;vertical-align:bottom}.inf .enc h1{margin:0;font-size:13pt}.inf .der{text-align:right}.inf .peq{font-size:7.5pt}
+.inf .d{margin-top:5px}
+.inf .d th{border:1px solid #000;font-size:8pt;padding:3px 3px;font-weight:bold;background:#fff;color:#000}
+.inf .d td{border:1px solid #000;padding:2px 3px;font-size:8.5pt;text-align:center;white-space:nowrap;height:5.2mm}
+.inf .d td.cli{text-align:left;max-width:70mm;overflow:hidden;text-overflow:clip}
+.inf .d td.cod{font-size:10.5pt}.inf .d td.m{font-size:10.5pt;text-align:right}.inf .d td.b{font-weight:bold}
+.inf .d tr.con td{font-weight:bold}
+.inf .tot{margin-top:5px}.inf .tot td{border:1px solid #000;padding:3px 6px;text-align:center;width:1%}
+.inf .tot span{display:block;font-size:8pt;font-weight:bold}.inf .tot b{display:block;font-size:11.5pt}
+.inf .tot td.gran{border:2.5px solid #000}.inf .tot td.gran b{font-size:13pt}
+.inf .obs{font-size:8.5pt;margin:5px 0 0}
+.inf .fir td{padding-top:30px;text-align:center;font-size:8pt}.inf .fir span{border-top:1px solid #000;padding:2px 30px}`;
+
+(function () {
+  const css = `
+  .rc label{display:block;font-size:11px;color:var(--mute);margin:0 0 3px;text-transform:uppercase;letter-spacing:.3px}
+  .rc input,.rc select,.rc textarea{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#fffbe6}
+  .rc input[readonly]{background:var(--soft,#eef2f8);border-color:transparent;font-weight:600}
+  .rc .fijo{background:var(--soft,#eef2f8);border-radius:8px;padding:9px 10px;font-weight:600;min-height:38px}
+  .rc .num{text-align:right}.rc .g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.rc .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+  @media(min-width:760px){.rc .gn{grid-template-columns:repeat(4,1fr)!important}}
+  .rc .inicio{display:inline-flex;align-items:center;gap:6px;background:var(--brand);color:#fff;border:0;border-radius:10px;padding:10px 14px;font-weight:600;margin-bottom:12px}
+  .rc .estado{float:right;font-size:12px;color:var(--mute);margin-top:12px}
+  .rc .ln{border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px;background:#fff}
+  .rc .ln .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.rc .ln .hd b{color:var(--brand)}
+  .rc .q{border:0;background:none;color:#b42318;font-size:13px}
+  .rc .ac{position:relative}.rc .ls{position:absolute;z-index:20;left:0;right:0;top:100%;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:300px;overflow:auto;display:none}
+  .rc .ls div{padding:9px 10px;border-bottom:1px solid #eee;cursor:pointer;font-size:14px}.rc .ls div:hover{background:#eef4fb}.rc .ls small{color:var(--mute)}
+  .rc .ina{color:#b42318;font-size:12px}.rc .ok{color:#006634;font-size:12px}.rc .sub{font-size:12px;color:var(--mute);margin-top:3px;min-height:15px}
+  .rc .ret{margin-top:8px;border:1px dashed var(--line);border-radius:10px;padding:8px 10px}
+  .rc .ret .chk{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px}.rc .ret .chk input{width:20px;height:20px}
+  .rc .sug{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.rc .sug button{border:1px solid var(--brand);background:#fff;color:var(--brand);border-radius:16px;padding:5px 10px;font-size:12.5px}
+  .rc .cal{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.rc .cal div{background:var(--soft,#eef2f8);border-radius:8px;padding:6px 10px}.rc .cal span{display:block;font-size:11px;color:var(--mute)}
+  .rc .av{color:#b42318;font-size:13px;margin-top:6px;font-weight:600}.rc .mal{background:#f8cbad!important}
+  .rc .tt{width:100%;border-collapse:collapse}.rc .tt td{padding:6px 4px;border-bottom:1px solid var(--line);font-size:14px}.rc .tt td:last-child{text-align:right;font-weight:600}
+  .rc .tt tr.tot td{border:0;background:var(--brand);color:#fff;font-size:17px;padding:10px}.rc .tt tr.sec td{color:var(--mute);font-size:12px;border:0;padding-top:10px}
+  .rc .bt{display:flex;flex-wrap:wrap;gap:8px;position:sticky;bottom:0;background:var(--bg);padding:10px 0}
+  .rc .bt button{flex:1;min-width:140px;border:0;border-radius:10px;padding:13px 10px;font-weight:600}
+  .rc .b1{background:var(--brand);color:#fff}.rc .b2{background:#123a8c;color:#fff}.rc .b3{background:#e3e7ef;color:var(--ink)}.rc .bc{background:#006634;color:#fff}
+  .rc .vista{overflow:auto;background:#fff}.rc .vista .fir{display:none}
+  .rc .chks{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.rc .chks label{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:18px;padding:6px 11px;font-size:13px;text-transform:none;letter-spacing:0;color:var(--ink);margin:0;background:#fff}
+  .rc .chks input{width:18px;height:18px;padding:0}.rc .chks label.on{border-color:var(--brand);background:#e3f4ea;font-weight:600}
+  .rc .rcb{display:flex}.rc .rcb span{background:var(--ink);color:#fff;font-weight:700;border-radius:8px 0 0 8px;padding:9px 12px}.rc .rcb input{border-radius:0 8px 8px 0}
+  .rc .anu{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;text-transform:none;letter-spacing:0;color:#b42318;margin-top:22px}.rc .anu input{width:20px;height:20px}
+  .rc .aj{margin-top:6px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:#fbfcfd}.rc .aj table{width:100%;border-collapse:collapse}.rc .aj td{padding:2px 4px;text-align:right;white-space:nowrap;font-size:12px}.rc .aj td:first-child{text-align:left}
+  .rc .aj tr.s td{font-weight:700;border-top:1px solid var(--line)}
+  .rc .pg{border:2px solid var(--brand);border-radius:12px;padding:10px 12px;margin:-4px 0 14px;background:#f4faf6}
+  .rc .pg .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}.rc .pg .hd b{color:var(--brand)}
+  .rc .pg .fp{display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr auto;gap:6px;align-items:end;margin-bottom:6px}
+  @media(max-width:620px){.rc .pg .fp{grid-template-columns:1fr 1fr}.rc .pg .fp .qx{grid-column:2}}
+  .rc .pg .cu{margin-top:6px;font-weight:700;font-size:14px}.rc .pg .cu.ok{color:#006634}.rc .pg .cu.no{color:#b42318}
+  .rc .pg .add{border:1px dashed var(--brand);background:#fff;color:var(--brand);border-radius:10px;padding:8px 12px;font-weight:600;width:100%}
+  #rc-print{display:none}
+  @media print{@page{size:letter landscape;margin:0} body{margin:0} body>*:not(#rc-print){display:none!important} #rc-print{display:block!important;padding:9mm 10mm}}
+  ` + MC_CSS_IMPRESO;
+  if (!document.getElementById('rc-css')) { const s = document.createElement('style'); s.id = 'rc-css'; s.textContent = css; document.head.appendChild(s); }
+
+  const TIPOS = [['Factura completa', 'FC – Factura completa'], ['Contado', 'Con – Contado'], ['Abono', 'A – Abono'], ['Saldo', 'S – Saldo']];
+  const FORMAS = [['Efectivo', 'Efectivo'], ['Cheque', 'Cheque'], ['Transferencia', 'Transferencia'], ['Consignación', 'Consignación']];
+  const MAX_LINEAS = 22;   // caben en una hoja carta (horizontal) con totales, observaciones y firmas
+  const CHKS = [['conRet', 'rf', 'Ret. Fte.'], ['conRi', 'ri', 'Ret. IVA'], ['conIca', 'ica', 'ICA'], ['conDev', 'dev', 'Devolución'], ['conDcto', 'dcto', 'Descuento']];
+  const chk = (l, k) => { const c = { rf: 'conRet', ri: 'conRi', ica: 'conIca', dev: 'conDev', dcto: 'conDcto' }[k]; return l[c] === undefined ? !vac(l[k]) : !!l[c]; };
+  const PCT_RETEIVA = 15;
+  const letraDe = inf => /norma|^n$/i.test(String(inf && inf.empresa || '')) ? 'N' : 'G';
+  const empLabel = e => /norma/i.test(e || '') ? 'N' : /guival/i.test(e || '') ? 'G' : (e || '');
+  const facDeLetra = (f, le) => !f.emp || (le === 'N' ? /norma/i.test(f.emp) : !/norma/i.test(f.emp));
+  let TAL = {};   // talonarios por vendedor: { libros: [{letra, desde, hasta, dig}], ultimo: {G, N} }
+  const $f = n => (n < 0 ? '-' : '') + '$ ' + Math.abs(Math.round(n || 0)).toLocaleString('es-CO');
+  const num = x => { const n = Number(String(x == null ? '' : x).replace(/[^\d\-]/g, '')); return isNaN(n) ? 0 : n; };
+  const vac = x => x === '' || x == null;
+  const usada = l => l && (l.cod || l.vf || l.pag || (l.anulado && l.recibo));
+  const parcial = l => l.tipo === 'Abono' || l.tipo === 'Saldo';
+  const hace = d => d === 0 ? 'hoy' : d === 1 ? 'hace 1 día' : 'hace ' + d + ' días';
+  const fCorta = iso => iso ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) : '';
+  const vacia = recibo => ({ cod: '', nombre: '', ciudad: '', inactivo: false, factura: '', facSistema: false, fsin: 0, femp: '', ftotal: 0, ratio: 0, tipo: '', recibo: recibo || '', anulado: false,
+    vf: '', saldo: '', conRet: false, conRi: false, conIca: false, conDev: false, conDcto: false, base: '', rf: '', ri: '', ica: '', dev: '', dcto: '', pag: '', forma: '' });
+  let VEND = '', LISTA = [], PEND = [], T = null, U = null, st = null, FACTS = {}, guardando = false, pendiente = false, timer = null, ultimo = '';
+
+  const soloVer = () => nivelDe('recibo') < 2 || !!state.verComo || (st && (st.estado === 'CERRADO' || st.estado === 'RECIBIDO'));
+  const dv = () => U.vendedores.find(v => v.vendedor === (st && st.vendedor)) || { vendedor: '', codigo: '', zona: '' };
+  const dias = iso => Math.round((new Date(U.hoyIso) - new Date(iso)) / 864e5);
+  const nuevo = vend => ({ id: U.hoyIso.replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 7).toUpperCase(), estado: 'NUEVO', inicio: U.hoy, cierre: '',
+    empresa: 'G', vendedor: vend, obs: '', lineas: [vacia()], pagos: {}, ver: 0 });
+  const LSK = () => 'guival_recibo_' + (st ? st.vendedor : '');
+
+  /** FC, Contado y Saldo: si no escribe el valor pagado se calcula; con la casilla Descuento, el descuento sale de lo pagado
+   *  (o lo pagado del descuento). Abono: solo lo que escriba. Solo cuentan los valores con su casilla marcada. */
+  function calc(l) {
+    if (l.anulado) return { f: 0, rf: 0, ri: 0, ica: 0, dev: 0, dcto: 0, rec: 0, cuadra: true, neg: false, ref: 0 };
+    const v = k => chk(l, k) ? num(l[k]) : 0;
+    const f = num(l.vf), rf = v('rf'), ri = v('ri'), ica = v('ica'), dev = v('dev'), ded = rf + ri + ica + dev;
+    const ref = (l.tipo === 'Saldo' && !vac(l.saldo)) ? num(l.saldo) : f;
+    const auto = (l.tipo === 'Factura completa' || l.tipo === 'Contado' || l.tipo === 'Saldo') && ref > 0;
+    const conD = chk(l, 'dcto');
+    let dcto = 0, rec, cuadra = true;
+    if (!auto) { dcto = conD ? num(l.dcto) : 0; rec = num(l.pag); }
+    else if (conD) {
+      dcto = !vac(l.dcto) ? num(l.dcto) : (!vac(l.pag) ? ref - ded - num(l.pag) : 0);
+      rec = !vac(l.pag) ? num(l.pag) : ref - ded - dcto;
+      if (!vac(l.dcto) && !vac(l.pag) && Math.abs(ref - ded - num(l.dcto) - num(l.pag)) > 1) cuadra = false;
+    } else {
+      rec = !vac(l.pag) ? num(l.pag) : ref - ded;
+      if (!vac(l.pag) && Math.abs(ref - ded - num(l.pag)) > 1) cuadra = false;
+    }
+    return { f, rf, ri, ica, dev, dcto, rec, cuadra, neg: dcto < 0 || rec < 0, ref, auto };
+  }
+  /* ----- recibos: varias facturas y varias formas de pago ----- */
+  const kRec = r => String(r || '').trim().toUpperCase();
+  const recibosDe = lns => { const o = []; lns.forEach(l => { const k = kRec(l.recibo); if (k && !o.includes(k)) o.push(k); }); return o; };
+  const sumaRecibo = k => st.lineas.filter(l => kRec(l.recibo) === k && !l.anulado && usada(l)).reduce((a, l) => a + calc(l).rec, 0);
+  const reciboAnulado = k => st.lineas.some(l => kRec(l.recibo) === k && l.anulado);
+  /** Formas de pago de un recibo; si hay una sola sin valor, vale lo de las facturas. */
+  function pagosDe(k) {
+    const ps = (st.pagos && st.pagos[k]) || [];
+    if (ps.length === 1 && vac(ps[0].valor)) return [Object.assign({}, ps[0], { valor: sumaRecibo(k), auto: true })];
+    return ps.map(p => Object.assign({}, p, { valor: num(p.valor) }));
+  }
+  function cuadreRecibo(k) {
+    const f = sumaRecibo(k), ps = pagosDe(k), p = ps.reduce((a, x) => a + x.valor, 0);
+    return { f, p, dif: p - f, ok: Math.abs(p - f) <= 1 && ps.length > 0 && ps.every(x => x.forma), sinForma: !ps.length || ps.some(x => !x.forma) };
+  }
+  window.__conv = {
+    aLineas(inf) {
+      if (!inf) return inf;
+      const lineas = [], pagos = {};
+      (inf.recibos || []).forEach(r => {
+        const k = kRec(r.recibo);
+        if (r.anulado) lineas.push(Object.assign(vacia(r.recibo), { anulado: true }));
+        else (r.facturas || []).forEach(f => { const o = Object.assign({}, f); delete o.c; o.recibo = r.recibo; lineas.push(o); });
+        if (k && (r.pagos || []).length) pagos[k] = r.pagos.map(p => ({ forma: p.forma || '', valor: p.valor == null ? '' : String(p.valor), banco: p.banco || '', ref: p.ref || p.referencia || '' }));
+      });
+      return Object.assign({}, inf, { lineas, pagos });
+    },
+    aRecibos(s) {
+      const orden = [], g = {};
+      (s.lineas || []).filter(usada).forEach(l => {
+        const k = kRec(l.recibo); let r = g[k];
+        if (!r) { r = g[k] = { recibo: k, anulado: false, facturas: [], pagos: [] }; orden.push(r); }
+        if (l.anulado) { r.anulado = true; return; }
+        const c = calc(l), f = Object.assign({}, l); delete f.recibo; delete f.forma;
+        f.c = { f: c.f, rf: c.rf, ri: c.ri, ica: c.ica, dev: c.dev, dcto: c.dcto, rec: c.rec, base: chk(l, 'rf') ? (l.facSistema ? num(l.fsin) : num(l.base)) : '' };
+        r.facturas.push(f);
+      });
+      orden.forEach(r => { if (!r.anulado) r.pagos = pagosDe(r.recibo).map(p => ({ forma: p.forma, valor: Math.round(p.valor), banco: p.banco || '', ref: p.ref || '' })); });
+      return { id: s.id, vendedor: s.vendedor, empresa: s.empresa, obs: s.obs, inicio: s.inicio, recibos: orden };
+    }
+  };
+  /** Lo ya pagado de esta factura en otros informes y en los otros pagos de este informe. */
+  function previo(i) {
+    const l = st.lineas[i], fu = String(l.factura || '').trim().toUpperCase(), p = { rec: 0, rf: 0, ri: 0, ica: 0, dev: 0, dcto: 0 };
+    if (!fu || !l.cod) return p;
+    const fi = (FACTS[l.cod] || []).find(f => f.doc === fu);
+    if (fi && fi.prev) Object.keys(p).forEach(k => p[k] += num(fi.prev[k]));
+    st.lineas.forEach((o, j) => { if (j >= i || o.anulado || o.cod !== l.cod || String(o.factura || '').trim().toUpperCase() !== fu) return;
+      const c = calc(o); Object.keys(p).forEach(k => p[k] += c[k]); });
+    p.total = p.rec + p.rf + p.ri + p.ica + p.dev + p.dcto;
+    return p;
+  }
+  /** Retención de IVA sugerida: 15 % del IVA de la factura (ya ajustada por notas), menos lo retenido antes. */
+  function reteIva(l, i) {
+    const vf = num(l.vf); let iva = null;
+    if (l.facSistema && vf) iva = vf - num(l.fsin); else if (!vac(l.base) && vf) iva = vf - num(l.base);
+    if (iva == null || iva <= 0) return null;
+    const antes = previo(i).ri;
+    return { iva, total: Math.round(iva * PCT_RETEIVA / 100), antes, sug: Math.max(0, Math.round(iva * PCT_RETEIVA / 100) - antes) };
+  }
+  /** Retención sugerida: base sin IVA × tarifa. Solo Guival/Lince y si la base llega al mínimo. */
+  function retencion(l) {
+    const emp = (l.facSistema && l.femp) ? l.femp : st.empresa;
+    if (/norma|^n$/i.test(emp)) return { error: 'Las facturas N no llevan retención en la fuente.' };
+    if (l.facSistema && !/guival|lince/i.test(emp)) return { error: 'Solo aplica a facturas de Guival o Lince.' };
+    const base = l.facSistema ? l.fsin : num(l.base);
+    if (!base) return { pideBase: true };
+    if (base < U.config.minimo) return { error: 'La base sin IVA (' + $f(base) + ') es menor al mínimo de ' + $f(U.config.minimo) + ': no aplica retención.', base };
+    const i = st.lineas.indexOf(l), antes = i >= 0 ? previo(i).rf : 0;
+    const r = { base, antes, total: Math.max(0, Math.round(base * U.config.tarifa / 100) - antes) };
+    if (parcial(l) && l.facSistema && num(l.vf) && !vac(l.pag)) r.pago = Math.round(num(l.pag) * (num(l.fsin) / num(l.vf)) * U.config.tarifa / 100);
+    return r;
+  }
+
+  /* ---------------- entrada ---------------- */
+  PANTALLAS.recibo = async t => {
+    T = t; $app.innerHTML = barra(t.nombre, true) + '<div class="spin"></div>';
+    try { U = await api('recibo.inicio'); } catch (e) { $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="card">${esc(e.message)}</div></div>`; return; }
+    FACTS = {}; st = null;
+    if (U.elige) { VEND = ''; LISTA = []; PEND = U.pendientes || []; return pintarLista(); }
+    VEND = U.vendedores[0].vendedor; LISTA = U.lista || []; TAL[VEND] = U.tal || { libros: [], ultimo: {} }; pintarLista();
+  };
+
+  /* ---------------- lista de informes del vendedor ---------------- */
+  const ESTADO = { ABIERTO: ['Abierto', '#fff3c4', '#7a5b00'], CERRADO: ['Cerrado · falta que cartera lo reciba', '#e3ecff', '#123a8c'], RECIBIDO: ['Recibido por cartera', '#e3f4ea', '#006634'] };
+  function pintarLista() {
+    st = null;
+    const v = U.vendedores.find(x => x.vendedor === VEND) || { vendedor: '', codigo: '', zona: '' };
+    const items = LISTA.map(x => { const e = ESTADO[x.estado] || [x.estado, '#eee', '#333'];
+      return `<div class="card it" data-id="${esc(x.id)}" style="cursor:pointer">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>Informe del ${esc(x.inicio)}${x.cierre ? ' al ' + esc(x.cierre) : ''}</b>
+        <span style="background:${e[1]};color:${e[2]};border-radius:12px;padding:3px 10px;font-size:12px;font-weight:600;white-space:nowrap">${e[0]}</span></div>
+        <div class="sub">${x.pagos} pago${x.pagos === 1 ? '' : 's'} · Total recibo ${$f(x.total)}${x.recibido ? ' · ' + esc(x.recibido) : ''}</div>
+        <button class="btn" style="margin-top:8px;width:100%">${x.estado === 'ABIERTO' ? 'Abrir y seguir llenando' : 'Ver'}</button></div>`; }).join('');
+    $app.innerHTML = barra(T.nombre, true) + `<div class="wrap rc">
+      <div class="card"><div class="g3">
+        <div><label>Vendedor</label>${U.elige ? `<select id="rc-ven"><option value="">${nivelDe('recibo') >= 3 ? '— Todos —' : '— Escoja —'}</option>${U.vendedores.map(x => `<option ${x.vendedor === VEND ? 'selected' : ''}>${esc(x.vendedor)}</option>`).join('')}</select>` : `<div class="fijo">${esc(v.vendedor)}</div>`}</div>
+        <div><label>Código</label><div class="fijo">${esc(v.codigo || '—')}</div></div><div><label>Zona</label><div class="fijo">${esc(v.zona || '—')}</div></div></div></div>
+      ${!VEND ? (nivelDe('recibo') >= 3 ? `<h3 style="margin:6px 2px 10px;font-size:15px">Por recibir · todos los vendedores (${PEND.length})</h3>
+        ${PEND.map(x => `<div class="card pe" data-id="${esc(x.id)}" data-v="${esc(x.vendedor)}" style="cursor:pointer">
+          <div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(x.vendedor)}</b><span class="sub" style="margin:0">Cerrado el ${esc(x.cierre)}</span></div>
+          <div class="sub">Informe del ${esc(x.inicio)} · ${x.pagos} pago${x.pagos === 1 ? '' : 's'} · Total recibo ${$f(x.total)}</div>
+          <button class="btn" style="margin-top:8px;width:100%">Revisar y recibir</button></div>`).join('') || '<div class="card">No hay informes pendientes por recibir.</div>'}
+        <p class="sub" style="padding:0 4px">Para ver todos los informes de un vendedor, escójalo arriba.</p>` : '<div class="card">Escoja el vendedor para ver sus informes.</div>') : `
+        ${nivelDe('recibo') >= 2 && !state.verComo ? botonesNuevo() : ''}
+        <h3 style="margin:6px 2px 10px;font-size:15px">Mis informes</h3>
+        ${items || '<div class="card">Todavía no hay informes.</div>'}
+        <p class="sub" style="padding:0 4px">Los informes abiertos y los cerrados se pueden cambiar hasta que cartera los reciba.</p>`}
+      ${U.talonarios && !state.verComo ? '<button class="btn" id="rc-tal" style="width:100%;margin:4px 0 12px">📒 Talonarios de recibos (entregar y reasignar)</button>' : ''}
+      ${config()}</div>`;
+    if (U.elige) document.getElementById('rc-ven').onchange = e => elegirVendedor(e.target.value);
+    $app.querySelectorAll('[data-nuevo]').forEach(b => b.onclick = () => { const le = b.dataset.nuevo;
+      if (!talDe(VEND).libros.some(t => t.letra === le) && !confirm('No tiene talonarios ' + le + ' asignados. Avísele a cartera. ¿Empezar el informe de todos modos?')) return;
+      FACTS = {}; cargar(VEND, null, le); });
+    const bt = document.getElementById('rc-tal'); if (bt) bt.onclick = () => pintarTalonarios();
+    $app.querySelectorAll('.it').forEach(c => c.onclick = () => abrirInforme(c.dataset.id));
+    $app.querySelectorAll('.pe').forEach(c => c.onclick = () => { VEND = c.dataset.v; abrirInforme(c.dataset.id); });
+    enlazarConfig();
+  }
+  async function abrirInforme(id) {
+    $app.innerHTML = barra(T.nombre, true) + '<div class="spin"></div>';
+    try { FACTS = {}; if (!TAL[VEND]) TAL[VEND] = await api('recibo.tal_de', { vendedor: VEND }); cargar(VEND, await api('recibo.informe', { id })); } catch (e) { aviso(e.message, true); volverLista(); }
+  }
+  async function volverLista() {
+    if (st) await guardarYa();
+    $app.innerHTML = barra(T.nombre, true) + '<div class="spin"></div>';
+    try {
+      if (VEND) { LISTA = await api('recibo.lista', { vendedor: VEND }); TAL[VEND] = await api('recibo.tal_de', { vendedor: VEND }); }
+      else { LISTA = []; if (nivelDe('recibo') >= 3) PEND = await api('recibo.pendientes'); }
+    } catch (e) { aviso(e.message, true); }
+    pintarLista();
+  }
+  function cargar(vend, abierto, letra) {
+    st = abierto ? Object.assign({ lineas: [], pagos: {} }, abierto) : nuevo(vend);
+    if (!st.pagos) st.pagos = {};
+    if (!abierto && letra) { st.empresa = letra; st.lineas[0].recibo = siguienteRecibo(vend, letra); }
+    st.empresa = letraDe(st);
+    // informes de antes de las casillas: queda marcada la casilla de cada valor que ya estaba lleno
+    st.lineas = (st.lineas || []).map(l => { const o = Object.assign({}, l);
+      [['conRet', 'rf'], ['conRi', 'ri'], ['conIca', 'ica'], ['conDev', 'dev'], ['conDcto', 'dcto']].forEach(([c, k]) => { if (o[c] === undefined) o[c] = !vac(o[k]); });
+      return Object.assign(vacia(), o); });
+    if (!st.lineas.length) st.lineas.push(vacia());
+    if (!abierto) { try { const g = JSON.parse(localStorage.getItem(LSK()) || 'null'); if (g && g.estado === 'NUEVO' && g.vendedor === vend && g.lineas.some(usada)) st = g; } catch (e) {} }
+    if (!st.pagos) st.pagos = {};
+    ultimo = JSON.stringify(st.lineas) + JSON.stringify(st.pagos) + st.obs + st.empresa;
+    pintar();
+  }
+  async function elegirVendedor(v) { VEND = v; volverLista(); }
+
+   
+  async function pintarTalonarios(lista) {
+    st = null;
+    if (!lista) { $app.innerHTML = barra(T.nombre, true) + '<div class="spin"></div>'; try { lista = await api('recibo.talonarios'); } catch (e) { aviso(e.message, true); return pintarLista(); } }
+    const vs = U.vendedores, opV = sel => vs.map(v => `<option ${v.vendedor === sel ? 'selected' : ''}>${esc(v.vendedor)}</option>`).join('');
+    const pad = (x, t) => String(x).padStart(Math.max(String(t.desde).length, String(t.hasta).length), '0');
+    $app.innerHTML = barra(T.nombre, true) + `<div class="wrap rc">
+      <button class="inicio" id="tl-volver">‹ Volver</button>
+      <div class="card"><b>Entregar talonario</b>
+        <div class="g2" style="margin-top:8px"><div><label>Letra</label><select id="tl-le"><option>G</option><option>N</option></select></div>
+          <div><label>Vendedor</label><select id="tl-v"><option value="">— Escoja —</option>${opV('')}</select></div>
+          <div><label>Primer recibo</label><input id="tl-d" inputmode="numeric" placeholder="Ej. 001501"></div>
+          <div><label>Último recibo</label><input id="tl-h" inputmode="numeric" placeholder="Ej. 001550"></div></div>
+        <button class="b1" id="tl-ok" style="width:100%;border:0;border-radius:10px;padding:12px;font-weight:600;margin-top:10px">Entregar</button>
+        <div class="sub">Los números no se pueden repetir entre talonarios de la misma letra.</div></div>
+      <div class="card"><div class="g2"><div><label>Ver vendedor</label><select id="tl-f"><option value="">Todos</option>${opV('')}</select></div>
+        <div><label>Buscar un recibo</label><input id="tl-b" inputmode="numeric" placeholder="Número"></div></div></div>
+      <div id="tl-lst"></div></div>`;
+    const lst = document.getElementById('tl-lst');
+    const pintarL = () => {
+      const fv = document.getElementById('tl-f').value, b = Number(digitos(document.getElementById('tl-b').value));
+      const ver = lista.filter(t => (!fv || t.vendedor === fv) && (!b || (b >= Number(t.desde) && b <= Number(t.hasta))));
+      lst.innerHTML = ver.map(t => `<div class="card"><div style="display:flex;justify-content:space-between;gap:8px"><b>${t.letra} ${esc(t.desde)} – ${esc(t.hasta)}</b><span>${esc(t.vendedor)}</span></div>
+        <div class="sub">Usados ${t.usados} de ${t.total}${t.ultimo ? ' · último ' + esc(t.ultimo) : ''} · entregado ${esc(t.entregado)} por ${esc(t.entrego)}</div>
+        ${t.historial ? `<div class="sub">${esc(t.historial)}</div>` : ''}
+        <div class="g2" style="margin-top:8px"><select data-rv="${esc(t.id)}"><option value="">Reasignar a…</option>${opV('')}</select>
+          ${t.usados ? '' : `<button class="btn" data-del="${esc(t.id)}" style="color:#b42318;border-color:#b42318">Borrar (no tiene recibos usados)</button>`}</div></div>`).join('')
+        || '<div class="card">No hay talonarios' + (fv || b ? ' con ese filtro' : ' entregados todavía') + '.</div>';
+      lst.querySelectorAll('[data-rv]').forEach(x => x.onchange = async () => { const v = x.value; if (!v) return;
+        const t = lista.find(y => y.id === x.dataset.rv);
+        if (!confirm('¿Reasignar el talonario ' + t.letra + ' ' + t.desde + '–' + t.hasta + ' de ' + t.vendedor + ' a ' + v + '?')) { x.value = ''; return; }
+        try { lista = await api('recibo.tal_reasignar', { id: t.id, vendedor: v }); TAL = {}; aviso('✔ Reasignado a ' + v); pintarL(); } catch (e) { aviso(e.message, true); x.value = ''; } });
+      lst.querySelectorAll('[data-del]').forEach(x => x.onclick = async () => { const t = lista.find(y => y.id === x.dataset.del);
+        if (!confirm('¿Borrar el talonario ' + t.letra + ' ' + t.desde + '–' + t.hasta + ' de ' + t.vendedor + '?')) return;
+        try { lista = await api('recibo.tal_eliminar', { id: t.id }); TAL = {}; aviso('✔ Borrado'); pintarL(); } catch (e) { aviso(e.message, true); } });
+    };
+    document.getElementById('tl-f').onchange = pintarL; document.getElementById('tl-b').oninput = pintarL;
+    document.getElementById('tl-volver').onclick = () => volverLista();
+    document.getElementById('tl-ok').onclick = async () => {
+      const t = { letra: document.getElementById('tl-le').value, vendedor: document.getElementById('tl-v').value, desde: document.getElementById('tl-d').value, hasta: document.getElementById('tl-h').value };
+      if (!t.vendedor) return aviso('Escoja el vendedor', true);
+      const b = document.getElementById('tl-ok'); b.disabled = true;
+      try { lista = await api('recibo.tal_guardar', { t }); TAL = {}; aviso('✔ Talonario ' + t.letra + ' entregado a ' + t.vendedor);
+        ['tl-d', 'tl-h'].forEach(id => document.getElementById(id).value = ''); pintarL(); } catch (e) { aviso(e.message, true); }
+      b.disabled = false;
+    };
+    pintarL();
+  }
+
+   
+  function cambio() {
+    if (soloVer()) return;
+    try { localStorage.setItem(LSK(), JSON.stringify(st)); } catch (e) {}
+    marcar('Cambios sin guardar…'); clearTimeout(timer); timer = setTimeout(guardarYa, 2000);
+  }
+  async function guardarYa() {
+    clearTimeout(timer);
+    if (!st || soloVer()) return;
+    const firma = JSON.stringify(st.lineas) + JSON.stringify(st.pagos) + st.obs + st.empresa;
+    if (firma === ultimo) return;
+    if (st.estado === 'NUEVO' && !st.lineas.some(usada) && !st.obs) return;
+    if (guardando) { pendiente = true; return; }
+    guardando = true; marcar('Guardando…');
+    try {
+      const r = await api('recibo.guardar', { inf: st, ver: st.ver });
+      st.ver = r.ver; st.estado = r.estado; st.inicio = r.inicio; ultimo = firma;
+      marcar('✔ Guardado ' + new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }));
+    } catch (e) {
+      if (e.message === 'CAMBIO_EN_OTRO_EQUIPO') { marcar('⚠ Este informe se cambió en otro equipo.'); if (confirm('Este informe se modificó en otro equipo. ¿Cargar la versión guardada? (lo último de esta pantalla se pierde)')) return elegirOVolver(); }
+      else if (/cerrado|recibi/.test(e.message)) { aviso(e.message, true); return elegirOVolver(); }
+      else marcar('⚠ Sin conexión: se reintenta solo'), timer = setTimeout(guardarYa, 15000);
+    } finally { guardando = false; if (pendiente) { pendiente = false; guardarYa(); } }
+  }
+  async function elegirOVolver() { const id = st.id; st = null; FACTS = {}; try { cargar(VEND, await api('recibo.informe', { id })); } catch (e) { aviso(e.message, true); volverLista(); } }
+  function marcar(txt) { const e = document.getElementById('rc-est'); if (e) e.textContent = txt; }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') guardarYa(); });
+
+   
+  function pintar() {
+    const v = st ? dv() : { codigo: '', zona: '' }, lv = soloVer();
+    $app.innerHTML = barra(T.nombre, true) + `<div class="wrap rc">
+      <button class="inicio" id="rc-home">‹ Mis informes</button><span class="estado" id="rc-est">${st && st.estado === 'ABIERTO' ? 'Informe abierto · se guarda solo' : ''}</span>
+      <div class="card"><div class="g3">
+        <div><label>Vendedor</label><div class="fijo">${esc(v.vendedor)}</div></div>
+        <div><label>Código</label><div class="fijo">${esc(v.codigo || '—')}</div></div><div><label>Zona</label><div class="fijo">${esc(v.zona || '—')}</div></div></div>
+        ${st ? `<div class="g3" style="margin-top:8px"><div><label>Empezó</label><div class="fijo">${esc(st.inicio)}</div></div>
+          <div><label>Cierre</label><div class="fijo">${esc(st.cierre || 'Abierto')}</div></div>
+          <div><label>Recibos</label><div class="fijo">Talonario ${letraDe(st)}</div></div></div>` : ''}
+      </div>
+      <div id="rc-cuerpo"></div></div>`;
+    document.getElementById('rc-home').onclick = () => volverLista();
+    if (st.estado === 'CERRADO' || st.estado === 'RECIBIDO') return pintarCerrado();
+    document.getElementById('rc-cuerpo').innerHTML = `<div id="rc-lin"></div>
+      ${lv ? '' : `<button class="btn" style="width:100%;margin-bottom:12px" id="rc-add">+ Agregar factura <small style="font-weight:400">(del mismo recibo o de uno nuevo · máximo ${MAX_LINEAS})</small></button>`}
+      <div class="card"><label>Observaciones (sucursal del cliente, abonos, etc.)</label><textarea id="rc-obs" rows="3" ${lv ? 'readonly' : ''}>${esc(st.obs || '')}</textarea></div>
+      <div class="card" id="rc-tot"></div>
+      <div class="bt"><button class="b2" id="rc-ver">👁 Vista previa</button>${lv ? '' : '<button class="bc" id="rc-cerrar">Cerrar informe</button>'}</div>`;
+    document.getElementById('rc-ver').onclick = vistaPrevia;
+    document.getElementById('rc-obs').oninput = e => { st.obs = e.target.value; cambio(); };
+    if (!lv) {
+      document.getElementById('rc-add').onclick = () => {
+        if (st.lineas.length >= MAX_LINEAS) return aviso('El informe ya tiene ' + MAX_LINEAS + ' pagos (lo que cabe en una hoja carta). Ciérrelo y empiece uno nuevo.', true);
+        st.lineas.push(vacia(ultimoRecibo(st.lineas.length))); lineas(); const u = document.querySelectorAll('.rc .ln'); u[u.length - 1].scrollIntoView({ behavior: 'smooth' }); };
+      document.getElementById('rc-cerrar').onclick = cerrar;
+    }
+    lineas();
+  }
+
+  function config() {
+    if (nivelDe('recibo') < 3 || state.verComo) return '';
+    return `<details class="card"><summary><b>⚙ Configuración de retención en la fuente</b> <small style="color:var(--mute)">(solo administrador)</small></summary>
+      <div class="g2" style="margin-top:10px"><div><label>Tarifa (%)</label><input id="rc-tar" inputmode="decimal" value="${String(U.config.tarifa).replace('.', ',')}"></div>
+      <div><label>Valor mínimo (base sin IVA)</label><input id="rc-min" inputmode="numeric" value="${num(U.config.minimo).toLocaleString('es-CO')}"></div></div>
+      <button class="btn" id="rc-cfg" style="margin-top:10px">Guardar configuración</button></details>`;
+  }
+  function enlazarConfig() {
+    const b = document.getElementById('rc-cfg'); if (!b) return;
+    b.onclick = async () => { try { U.config = await api('recibo.config', { config: { tarifa: document.getElementById('rc-tar').value, minimo: document.getElementById('rc-min').value } }); aviso('✔ Tarifa ' + U.config.tarifa + '% · mínimo ' + $f(U.config.minimo)); if (st) lineas(); } catch (e) { aviso(e.message, true); } };
+  }
+
+  const talDe = v => TAL[v] || { libros: [], ultimo: {} };
+  const digitos = r => String(r || '').replace(/\D/g, '');
+  const nRec = r => { const d = digitos(r); return d ? Number(d) : NaN; };
+  const libroDe = (n, le) => talDe(st ? st.vendedor : VEND).libros.find(t => t.letra === le && n >= t.desde && n <= t.hasta);
+  const fmtRec = (n, le, dig) => le + String(n).padStart(dig || 6, '0');
+  function botonesNuevo() {
+    const ls = talDe(VEND).libros, hay = le => ls.some(t => t.letra === le);
+    const letras = hay('G') || hay('N') ? ['G', 'N'].filter(hay) : ['G', 'N'];
+    return `<div style="display:flex;gap:8px;margin-bottom:12px">${letras.map(le => `<button class="b1" data-nuevo="${le}" style="flex:1;border:0;border-radius:10px;padding:13px;font-weight:600">+ Informe nuevo · recibos ${le}</button>`).join('')}</div>
+      ${ls.length ? `<div class="sub" style="margin:-6px 4px 10px">Sus talonarios: ${ls.map(t => t.letra + ' ' + String(t.desde).padStart(t.dig, '0') + '–' + String(t.hasta).padStart(t.dig, '0')).join(' · ')}</div>` : '<div class="sub" style="margin:-6px 4px 10px">No tiene talonarios asignados: avísele a cartera.</div>'}`;
+  }
+  /** Primer recibo de un informe nuevo: el siguiente al último que usó en esa letra. */
+  function siguienteRecibo(vend, le) {
+    const T = talDe(vend), u = T.ultimo && T.ultimo[le], ls = T.libros.filter(t => t.letra === le).sort((a, b) => a.desde - b.desde);
+    if (!ls.length) return '';
+    const sig = u ? u + 1 : ls[0].desde, t = ls.find(x => sig >= x.desde && sig <= x.hasta) || ls.find(x => x.desde > sig) || ls[0];
+    const n = sig >= t.desde && sig <= t.hasta ? sig : t.desde;
+    return fmtRec(n, le, t.dig);
+  }
+  const ultimoRecibo = i => { for (let j = i - 1; j >= 0; j--) if (digitos(st.lineas[j].recibo)) return String(st.lineas[j].recibo).trim(); return ''; };
+  /** Completa el recibo: con los 3 últimos dígitos busca el número en sus talonarios; con el número completo revisa que sea suyo. */
+  function resolverRecibo(i, txt) {
+    const le = letraDe(st), d = digitos(txt), libros = talDe(st.vendedor).libros.filter(t => t.letra === le);
+    if (!d) return { rec: '' };
+    if (!libros.length) return { rec: le + d, aviso: 'No tiene talonarios ' + le + ' asignados: avísele a cartera.' };
+    if (d.length <= 3) {
+      const fin = Number(d), prev = nRec(ultimoRecibo(i)), cand = [];
+      libros.forEach(t => { for (let n = t.desde - (t.desde % 1000) + fin; n <= t.hasta; n += 1000) if (n >= t.desde) cand.push([n, t]); });
+      if (!cand.length) return { rec: '', aviso: 'Ningún recibo de sus talonarios ' + le + ' termina en ' + d.padStart(3, '0') + '.' };
+      cand.sort((a, b) => a[0] - b[0]);
+      const el = (!isNaN(prev) && (cand.find(c => c[0] >= prev) || cand[cand.length - 1])) || cand[0];
+      return { rec: fmtRec(el[0], le, el[1].dig) };
+    }
+    const n = Number(d), t = libroDe(n, le);
+    if (!t) return { rec: le + d, aviso: 'El recibo ' + le + d + ' no está en sus talonarios ' + le + ' (' + libros.map(x => String(x.desde).padStart(x.dig, '0') + '–' + String(x.hasta).padStart(x.dig, '0')).join(', ') + '). Revise el número.' };
+    return { rec: fmtRec(n, le, t.dig) };
+  }
+  /** El recibo debe ser el mismo del pago anterior o el siguiente. */
+  function avisoRecibo(i) {
+    const r = String(st.lineas[i].recibo || '').trim(), a = ultimoRecibo(i);
+    if (!digitos(r) || !a) return '';
+    const nr = nRec(r), na = nRec(a);
+    if (nr === na || nr === na + 1) return '';
+    const sig = a.replace(/\d+$/, m => String(na + 1).padStart(m.length, '0'));
+    return 'Ojo: este no es el consecutivo que le toca. Después del recibo ' + a + ' sigue el mismo ' + a + ' o el ' + sig + '. Los recibos (también los anulados) van en orden.';
+  }
+  const campoNum = (l, c, tt, lv, extra) => `<div><label>${tt}</label><input class="num" data-c="${c}" inputmode="numeric" value="${vac(l[c]) ? '' : num(l[c]).toLocaleString('es-CO')}" ${lv ? 'readonly' : ''}>${extra || ''}</div>`;
+  function htmlLinea(l, i) {
+    const lv = soloVer(), opt = (lst, v) => lst.map(([val, txt]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${txt}</option>`).join('');
+    const extras = [chk(l, 'ri') ? campoNum(l, 'ri', 'Ret. IVA', lv, '<div class="sug" data-o="risug"></div>') : '', chk(l, 'ica') ? campoNum(l, 'ica', 'ICA', lv) : '',
+      chk(l, 'dev') ? campoNum(l, 'dev', 'Devolución', lv) : '', chk(l, 'dcto') ? campoNum(l, 'dcto', 'Descuento', lv) : ''].join('');
+    return `<div class="ln" data-i="${i}">
+      <div class="hd"><b>Factura ${i + 1} <small style="font-weight:400;color:var(--mute)">de ${MAX_LINEAS}</small></b>${!lv ? `<button class="q" data-q="${i}">Quitar</button>` : ''}</div>
+      <div class="g2"><div><label>Recibo (o sus 3 últimos números)</label><div class="rcb"><span>${letraDe(st)}</span><input data-c="recibo" value="${esc(digitos(l.recibo))}" inputmode="numeric" autocomplete="off" ${lv ? 'readonly' : ''}></div></div>
+        <div><label class="anu"><input type="checkbox" data-c="anulado" ${l.anulado ? 'checked' : ''} ${lv ? 'disabled' : ''}> Recibo anulado</label></div></div>
+      <div class="av" data-o="recav"></div>
+      ${l.anulado ? '<div class="sub">Recibo anulado: no necesita más datos.</div>' : `
+      <div style="margin-top:8px"><label>Tipo de pago</label><select data-c="tipo" ${lv ? 'disabled' : ''}><option value="">— Escoja —</option>${opt(TIPOS, l.tipo)}</select>
+        <div class="sub" data-o="tipo"></div></div>
+      <div style="display:grid;grid-template-columns:110px 1fr;gap:8px;margin-top:8px">
+        <div><label>Código</label><input data-c="cod" value="${esc(l.cod)}" readonly tabindex="-1"></div>
+        <div class="ac"><label>Cliente (nombre o código)</label><input data-c="nombre" value="${esc(l.nombre)}" autocomplete="off" placeholder="Escriba nombre o código" ${lv ? 'readonly' : ''}>
+          <div class="ls"></div><div class="sub" data-o="ciu">${esc(l.ciudad)}${l.inactivo ? ' · <span class="ina">cliente inactivo</span>' : ''}</div></div></div>
+      <div class="ac" style="margin-top:8px"><label>Factura (toque para ver las del cliente, o escríbala)</label>
+        <input data-c="factura" value="${esc(l.factura)}" autocomplete="off" autocapitalize="characters" placeholder="${l.cod ? 'Toque para ver facturas' : 'Primero escoja el cliente'}" ${lv ? 'readonly' : ''}>
+        <div class="ls"></div><div class="sub" data-o="finfo"></div><div data-o="aj"></div></div>
+      <label style="margin-top:10px">El recibo trae (marque lo que aplique)</label>
+      <div class="chks">${CHKS.map(([c, , tt]) => `<label class="${chk(l, c === 'conRet' ? 'rf' : c === 'conRi' ? 'ri' : c === 'conIca' ? 'ica' : c === 'conDev' ? 'dev' : 'dcto') ? 'on' : ''}"><input type="checkbox" data-k="${c}" ${chk(l, c === 'conRet' ? 'rf' : c === 'conRi' ? 'ri' : c === 'conIca' ? 'ica' : c === 'conDev' ? 'dev' : 'dcto') ? 'checked' : ''} ${lv ? 'disabled' : ''}> ${tt}</label>`).join('')}</div>
+      ${chk(l, 'rf') ? '<div class="ret"><div data-o="ret"></div></div>' : '<div data-o="ret"></div>'}
+      <div class="g2 gn" style="margin-top:8px">${campoNum(l, 'vf', 'Vr. factura', lv)}${extras}${campoNum(l, 'pag', 'Valor pagado', lv)}</div>
+      <div class="cal"><div><span>Descuento aplicado</span><b data-o="dcto"></b></div><div><span>Valor recibido</span><b data-o="rec"></b></div></div>`}
+      <div class="av" data-o="av"></div></div>`;
+  }
+  /** Recuadro de formas de pago de un recibo (va después de su última factura). */
+  function htmlPagos(k) {
+    const lv = soloVer(), ps = (st.pagos[k] && st.pagos[k].length) ? st.pagos[k] : [{ forma: '', valor: '', banco: '', ref: '' }];
+    const opt = v => FORMAS.map(([val, txt]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${txt}</option>`).join('');
+    const n = st.lineas.filter(l => kRec(l.recibo) === k && !l.anulado && usada(l)).length;
+    return `<div class="pg" data-r="${esc(k)}"><div class="hd"><b>Pago del recibo ${esc(k)}</b><small class="sub" style="margin:0">${n} factura${n === 1 ? '' : 's'}</small></div>
+      ${ps.map((p, j) => `<div class="fp" data-j="${j}">
+        <div><label>Forma de pago</label><select data-p="forma" ${lv ? 'disabled' : ''}><option value="">— Escoja —</option>${opt(p.forma)}</select></div>
+        <div><label>Valor</label><input class="num" data-p="valor" inputmode="numeric" value="${vac(p.valor) ? '' : num(p.valor).toLocaleString('es-CO')}" placeholder="${ps.length === 1 ? 'Todo el recibo' : ''}" ${lv ? 'readonly' : ''}></div>
+        <div><label>Banco</label><input data-p="banco" value="${esc(p.banco)}" placeholder="${p.forma === 'Efectivo' ? '—' : 'Banco'}" ${lv || p.forma === 'Efectivo' ? 'readonly' : ''}></div>
+        <div><label>N.º comprobante</label><input data-p="ref" value="${esc(p.ref)}" placeholder="${p.forma === 'Efectivo' ? '—' : 'Número'}" ${lv || p.forma === 'Efectivo' ? 'readonly' : ''}></div>
+        ${lv || ps.length < 2 ? '<div></div>' : `<button class="q qx" data-px="${j}">Quitar</button>`}</div>`).join('')}
+      ${lv ? '' : '<button class="add" data-padd>+ Otra forma de pago en este recibo</button>'}
+      <div class="cu" data-o="cu"></div></div>`;
+  }
+  function enlazarPagos(el) {
+    const k = el.dataset.r, P = () => { if (!st.pagos[k] || !st.pagos[k].length) st.pagos[k] = [{ forma: '', valor: '', banco: '', ref: '' }]; return st.pagos[k]; };
+    el.querySelectorAll('[data-p]').forEach(inp => {
+      const j = +inp.closest('[data-j]').dataset.j, c = inp.dataset.p;
+      inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => {
+        P()[j][c] = inp.classList.contains('num') ? inp.value.replace(/[^\d]/g, '') : inp.value;
+        if (c === 'forma') { if (inp.value === 'Efectivo') { P()[j].banco = ''; P()[j].ref = ''; } repintarPagos(k); }
+        else cuadre(k);
+        cambio(); totales();
+      });
+      if (inp.classList.contains('num')) inp.addEventListener('blur', () => { inp.value = vac(P()[j][c]) ? '' : num(P()[j][c]).toLocaleString('es-CO'); });
+    });
+    el.querySelectorAll('[data-px]').forEach(b => b.onclick = () => { P().splice(+b.dataset.px, 1); repintarPagos(k); cambio(); totales(); });
+    const a = el.querySelector('[data-padd]');
+    if (a) a.onclick = () => { const ps = P();
+      if (ps.length === 1 && vac(ps[0].valor)) ps[0].valor = String(Math.round(sumaRecibo(k)));   // la primera queda con su valor
+      ps.push({ forma: '', valor: '', banco: '', ref: '' }); repintarPagos(k); cambio(); };
+  }
+  function cuadre(k) {
+    const el = document.querySelector(`.rc .pg[data-r="${CSS.escape(k)}"]`); if (!el) return;
+    const c = cuadreRecibo(k), o = el.querySelector('[data-o=cu]');
+    o.className = 'cu ' + (c.ok ? 'ok' : 'no');
+    o.innerHTML = `Facturas ${$f(c.f)} · Pagos ${$f(c.p)} · ` + (c.sinForma ? '✗ Escoja la forma de pago' : c.ok ? '✓ Cuadra' : (c.dif < 0 ? '✗ Faltan ' + $f(-c.dif) : '✗ Sobran ' + $f(c.dif)));
+  }
+  function repintarPagos(k) {
+    const el = document.querySelector(`.rc .pg[data-r="${CSS.escape(k)}"]`); if (!el) return lineas();
+    const tmp = document.createElement('div'); tmp.innerHTML = htmlPagos(k); const nuevo = tmp.firstElementChild;
+    el.replaceWith(nuevo); if (!soloVer()) enlazarPagos(nuevo); cuadre(k);
+  }
+  /** Si a un recibo le cambiaron el número y quedó solo, sus formas de pago se van con él. */
+  function moverPagos(viejo, nuevo) {
+    viejo = kRec(viejo); nuevo = kRec(nuevo);
+    if (!viejo || viejo === nuevo || !st.pagos[viejo]) return;
+    if (!st.lineas.some(l => kRec(l.recibo) === viejo) && !st.pagos[nuevo]) st.pagos[nuevo] = st.pagos[viejo];
+    if (!st.lineas.some(l => kRec(l.recibo) === viejo)) delete st.pagos[viejo];
+  }
+  function lineas() {
+    const box = document.getElementById('rc-lin'), lv = soloVer();
+    const ultimaDe = {}; st.lineas.forEach((l, i) => { const k = kRec(l.recibo); if (k) ultimaDe[k] = i; });
+    box.innerHTML = st.lineas.map((l, i) => { const k = kRec(l.recibo);
+      return htmlLinea(l, i) + (k && ultimaDe[k] === i && !reciboAnulado(k) ? htmlPagos(k) : ''); }).join('');
+    if (!lv) box.querySelectorAll('.pg').forEach(enlazarPagos);
+    box.querySelectorAll('.pg').forEach(el => cuadre(el.dataset.r));
+    box.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { const i = +b.dataset.q; if (!confirm('¿Quitar el pago ' + (i + 1) + '?')) return; st.lineas.splice(i, 1); if (!st.lineas.length) st.lineas.push(vacia()); lineas(); cambio(); });
+    if (!lv) box.querySelectorAll('.ln').forEach(enlazar);
+    st.lineas.forEach((l, i) => refrescar(i));
+  }
+   
+  function pintarLinea(i) {
+    const el = document.querySelector(`.rc .ln[data-i="${i}"]`); if (!el) return;
+    if (st.lineas[i].anulado || !document.querySelector(`.rc .pg[data-r="${CSS.escape(kRec(st.lineas[i].recibo))}"]`)) return lineas();
+    const tmp = document.createElement('div'); tmp.innerHTML = htmlLinea(st.lineas[i], i); const nuevo = tmp.firstElementChild;
+    el.replaceWith(nuevo);
+    nuevo.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { if (!confirm('¿Quitar el pago ' + (i + 1) + '?')) return; st.lineas.splice(i, 1); if (!st.lineas.length) st.lineas.push(vacia()); lineas(); cambio(); });
+    if (!soloVer()) enlazar(nuevo);
+    refrescar(i);
+  }
+
+  function enlazar(el) {
+    const i = +el.dataset.i, L = () => st.lineas[i];
+    el.querySelectorAll('[data-c]').forEach(inp => {
+      const c = inp.dataset.c;
+      if (c === 'cod') return;
+      if (c === 'nombre') return buscador(el, inp, i);
+      if (c === 'factura') return selFactura(el, inp, i);
+      if (c === 'anulado') return inp.addEventListener('change', () => {
+        if (inp.checked && usada(Object.assign({}, L(), { anulado: false })) && !confirm('¿Marcar el recibo como anulado? Se borran los demás datos de este pago.')) { inp.checked = false; return; }
+        const r = L().recibo; st.lineas[i] = Object.assign(vacia(r), { anulado: inp.checked }); pintarLinea(i); totales(); cambio(); });
+      inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => {
+        L()[c] = inp.classList.contains('num') ? inp.value.replace(/[^\d]/g, '') : inp.value;
+        if (c === 'tipo') alCambiarTipo(el, i);
+        if (c === 'vf' && L().facSistema && L().ratio) L().fsin = String(Math.round(num(L().vf) * L().ratio));
+        if (c === 'recibo') { L().recibo = digitos(inp.value) ? letraDe(st) + digitos(inp.value) : ''; el.querySelector('[data-o=recav]').textContent = ''; return cambio(); }
+        refrescar(i); cambio();
+      });
+      if (c === 'recibo') inp.addEventListener('focus', () => { inp._antes = L().recibo; });
+      if (c === 'recibo') inp.addEventListener('blur', () => {
+        const r = resolverRecibo(i, inp.value); L().recibo = r.rec; inp.value = digitos(r.rec); moverPagos(inp._antes, r.rec); cambio();
+        if (kRec(inp._antes) !== kRec(r.rec)) setTimeout(() => { lineas(); totales(); }, 0);
+        const a = [r.aviso, avisoRecibo(i)].filter(Boolean).join(' '); el.querySelector('[data-o=recav]').textContent = a; if (a) aviso(a, true); });
+      if (inp.classList.contains('num')) inp.addEventListener('blur', () => { inp.value = vac(L()[c]) ? '' : num(L()[c]).toLocaleString('es-CO'); if (c === 'vf') refrescar(i); });
+    });
+    el.querySelectorAll('[data-k]').forEach(inp => inp.addEventListener('change', () => {
+      const l = L(), k = inp.dataset.k, campo = { conRet: 'rf', conRi: 'ri', conIca: 'ica', conDev: 'dev', conDcto: 'dcto' }[k];
+      l[k] = inp.checked;
+      if (!inp.checked) { l[campo] = ''; if (k === 'conRet') l.base = ''; }
+      else if (k === 'conRet' && vac(l.rf)) sugerirRet(i, 'total');
+      else if (k === 'conRi' && vac(l.ri)) { const r = reteIva(l, i); if (r && r.sug) l.ri = String(r.sug); }
+      pintarLinea(i); totales(); cambio();
+      const f = document.querySelector(`.rc .ln[data-i="${i}"] [data-c=${campo}]`); if (inp.checked && f && vac(l[campo])) f.focus();
+    }));
+  }
+  function alCambiarTipo(el, i) {
+    const l = st.lineas[i];
+    if (l.tipo === 'Abono') l.saldo = '';
+  }
+  function sugerirRet(i, cual) {
+    const l = st.lineas[i], r = retencion(l);
+    if (r.error || r.pideBase) return;
+    l.rf = String(cual === 'pago' && r.pago != null ? r.pago : r.total);
+    const inp = document.querySelector(`.rc .ln[data-i="${i}"] [data-r=rf]`); if (inp) inp.value = num(l.rf).toLocaleString('es-CO');
+  }
+  function pintarRet(el, i) {
+    const l = st.lineas[i], box = el.querySelector('[data-o=ret]'), lv = soloVer();
+    if (!box) return;
+    if (l.anulado || !chk(l, 'rf')) { box.innerHTML = ''; return; }
+    const r = retencion(l), base = l.facSistema ? '' :
+      `<div style="margin-top:6px"><label>Base gravable (valor de la factura sin IVA)</label><input class="num" data-r="base" inputmode="numeric" value="${vac(l.base) ? '' : num(l.base).toLocaleString('es-CO')}" ${lv ? 'readonly' : ''}></div>`;
+    let info = '';
+    if (r.error) info = `<div class="ina" style="margin-top:6px">${esc(r.error)}</div>`;
+    else if (r.pideBase) info = '<div class="sub">Escriba la base sin IVA para calcularla, o escriba abajo el valor que se descontó el cliente.</div>';
+    else info = `<div class="sub"><b>Retención en la fuente</b> · base ${$f(r.base)} × ${String(U.config.tarifa).replace('.', ',')}%${r.antes ? ' · ya retenido antes ' + $f(r.antes) : ''}</div><div class="sug">
+      <button data-s="total">${r.antes ? 'Lo que falta' : 'Sobre la factura'}: ${$f(r.total)}</button>${r.pago != null ? `<button data-s="pago">Sobre este pago: ${$f(r.pago)}</button>` : ''}</div>`;
+    box.innerHTML = base + info + `<div style="margin-top:6px"><label>Retención en la fuente descontada</label><input class="num" data-r="rf" inputmode="numeric" value="${vac(l.rf) ? '' : num(l.rf).toLocaleString('es-CO')}" ${lv ? 'readonly' : ''}></div>`;
+    if (lv) return;
+    box.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { sugerirRet(i, b.dataset.s); refrescar(i); cambio(); });
+    box.querySelectorAll('[data-r]').forEach(inp => {
+      inp.oninput = () => { l[inp.dataset.r] = inp.value.replace(/[^\d]/g, ''); if (inp.dataset.r === 'base') { l.rf = ''; } recalc(i); cambio(); };
+      inp.onblur = () => { const k = inp.dataset.r; inp.value = vac(l[k]) ? '' : num(l[k]).toLocaleString('es-CO'); if (k === 'base') { if (vac(l.rf)) sugerirRet(i, 'total'); refrescar(i); } };
+    });
+  }
+
+  function recalc(i) {   // actualiza números y avisos sin repintar los campos
+    const el = document.querySelector(`.rc .ln[data-i="${i}"]`); if (!el) return;
+    const l = st.lineas[i];
+    el.querySelector('[data-o=recav]').textContent = avisoRecibo(i);
+    if (l.anulado) { el.querySelector('[data-o=av]').innerHTML = l.recibo ? '' : 'Escriba el número del recibo anulado.'; return totales(); }
+    // saldo de la factura = valor de referencia − lo pagado antes (otros informes y otros pagos de este)
+    const fu = String(l.factura || '').trim().toUpperCase(), fi = (FACTS[l.cod] || []).find(f => f.doc === fu), p = previo(i);
+    if (l.tipo === 'Saldo') l.saldo = vac(l.vf) ? '' : String(Math.max(0, num(l.vf) - p.total));
+    const c = calc(l), av = [];
+    el.querySelector('[data-o=dcto]').textContent = chk(l, 'dcto') && (c.dcto || !vac(l.dcto)) ? $f(c.dcto) : '—';
+    el.querySelector('[data-o=rec]').textContent = usada(l) ? $f(c.rec) : '—';
+    if (usada(l) && !l.tipo) av.push('Escoja el tipo de pago.');
+    if (!c.cuadra) av.push(chk(l, 'dcto') ? 'El descuento y el valor pagado no cuadran con la factura. Revise los valores.'
+      : 'El valor pagado no cuadra con ' + (l.tipo === 'Saldo' ? 'el saldo' : 'la factura') + ' (' + $f(c.ref) + ' menos lo descontado). Marque Descuento si el cliente se descontó algo, o cambie el tipo a Abono.');
+    if (c.neg) av.push('Un valor da negativo: revise.');
+    if (l.tipo === 'Abono' && usada(l) && vac(l.pag)) av.push('Escriba el valor pagado.');
+    if (fu && st.lineas.some((o, j) => j !== i && !o.anulado && String(o.factura || '').trim().toUpperCase() === fu && o.cod === l.cod && !parcial(o) && !parcial(l))) av.push('Esta factura ya está en otro pago de este informe.');
+    el.querySelector('[data-o=av]').innerHTML = av.map(esc).join('<br>');
+    ['dcto', 'pag'].forEach(x => { const f = el.querySelector(`[data-c=${x}]`); if (f) f.classList.toggle('mal', !c.cuadra); });
+    el.querySelector('[data-c=tipo]').classList.toggle('mal', !!(usada(l) && !l.tipo));
+    el.querySelector('[data-o=tipo]').innerHTML = l.tipo === 'Contado' ? 'El descuento de contado lo autoriza la gerencia con su firma en el informe impreso.' :
+      l.tipo === 'Abono' ? 'Abono: escriba lo que pagó. El descuento solo si marca la casilla.' :
+      l.tipo === 'Saldo' ? (vac(l.saldo) ? '' : 'Saldo pendiente de la factura: <b>' + $f(num(l.saldo)) + '</b>' + (p.total ? ' (ya se reportaron ' + $f(p.total) + ')' : '')) : '';
+    el.querySelector('[data-o=finfo]').innerHTML = fi ? infoFac(fi) : (fu && l.cod && FACTS[l.cod] ? 'Factura digitada a mano (no está entre las recientes del cliente)' : '');
+    pintarAjuste(el, i, fi);
+    const rs = el.querySelector('[data-o=risug]');
+    if (rs) { const r = reteIva(l, i); rs.innerHTML = r ? `<button data-ri="${r.sug}">15% del IVA (${$f(r.iva)})${r.antes ? ' menos lo ya retenido' : ''}: ${$f(r.sug)}</button>` : '<span class="sub">Sin IVA de referencia: escriba lo que retuvo el cliente.</span>';
+      const b = rs.querySelector('[data-ri]'); if (b && !soloVer()) b.onclick = () => { l.ri = b.dataset.ri; el.querySelector('[data-c=ri]').value = num(l.ri).toLocaleString('es-CO'); recalc(i); cambio(); }; }
+    cuadre(kRec(l.recibo));
+    totales();
+  }
+   
+  function pintarAjuste(el, i, fi) {
+    const box = el.querySelector('[data-o=aj]'), l = st.lineas[i];
+    if (!box) return;
+    if (!fi || !l.facSistema || !(fi.notas && fi.notas.length)) { box.innerHTML = ''; return; }
+    const ns = fi.notas, sN = ns.reduce((a, n) => a + n.sin, 0), tN = ns.reduce((a, n) => a + n.total, 0);
+    const base = fi.sin - sN, tot = fi.total - tN, iva = tot - base, ivaF = fi.total - fi.sin;
+    const usa = num(l.vf) === tot ? 'sug' : num(l.vf) === fi.total ? 'ori' : 'otro';
+    box.innerHTML = `<div class="aj"><b>Documentos relacionados con esta factura</b>
+      <table><tr><td></td><td>Base</td><td>IVA</td><td>Total</td></tr>
+      <tr><td>Factura ${esc(fi.doc)}</td><td>${$f(fi.sin)}</td><td>${$f(ivaF)}</td><td>${$f(fi.total)}</td></tr>
+      ${ns.map(n => `<tr><td>− ${esc(n.doc)} ${n.fecha ? '<small>' + fCorta(n.fecha) + '</small>' : ''}</td><td>${$f(n.sin)}</td><td>${$f(n.total - n.sin)}</td><td>${$f(n.total)}</td></tr>`).join('')}
+      <tr class="s"><td>Nuevo valor sugerido</td><td>${$f(base)}</td><td>${$f(iva)}</td><td>${$f(tot)}</td></tr></table>
+      ${soloVer() ? '' : `<div class="sug"><button data-aj="sug" ${usa === 'sug' ? 'style="background:var(--brand);color:#fff"' : ''}>Usar el sugerido ${$f(tot)}</button><button data-aj="ori" ${usa === 'ori' ? 'style="background:var(--brand);color:#fff"' : ''}>Usar el de la factura ${$f(fi.total)}</button></div>
+      <div class="sub">O escriba otro valor en "Vr. factura". Ese queda como referencia para los cálculos.</div>`}</div>`;
+    box.querySelectorAll('[data-aj]').forEach(b => b.onclick = () => {
+      const s = b.dataset.aj === 'sug';
+      Object.assign(l, { vf: String(s ? tot : fi.total), fsin: s ? base : fi.sin, ftotal: s ? tot : fi.total });
+      el.querySelector('[data-c=vf]').value = num(l.vf).toLocaleString('es-CO');
+      if (chk(l, 'rf')) { l.rf = ''; sugerirRet(i, 'total'); }
+      if (chk(l, 'ri')) { const r = reteIva(l, i); l.ri = r ? String(r.sug) : l.ri; }
+      pintarLinea(i); cambio();
+    });
+  }
+  function refrescar(i) { const el = document.querySelector(`.rc .ln[data-i="${i}"]`); if (!el) return; pintarRet(el, i); recalc(i); }
+
+  function sumas() {
+    const t = { rf: 0, ri: 0, ica: 0, dev: 0, dcto: 0, ef: 0, ch: 0, nch: 0, tr: 0, ntr: 0, co: 0, nco: 0 };
+    st.lineas.forEach(l => { if (!usada(l) || l.anulado) return; const c = calc(l); t.rf += c.rf; t.ri += c.ri; t.ica += c.ica; t.dev += c.dev; t.dcto += c.dcto; });
+    recibosDe(st.lineas.filter(l => usada(l) && !l.anulado)).forEach(k => pagosDe(k).forEach(p => {
+      if (p.forma === 'Efectivo') t.ef += p.valor; if (p.forma === 'Cheque') { t.ch += p.valor; t.nch++; }
+      if (p.forma === 'Transferencia') { t.tr += p.valor; t.ntr++; } if (p.forma === 'Consignación') { t.co += p.valor; t.nco++; } }));
+    t.total = t.ef + t.ch + t.tr + t.co; return t;
+  }
+  function totales() {
+    const box = document.getElementById('rc-tot'); if (!box) return;
+    const t = sumas();
+    box.innerHTML = `<table class="tt"><tr class="sec"><td colspan="2">DESCUENTOS DEL CLIENTE</td></tr>
+      <tr><td>Retención en la fuente</td><td>${$f(t.rf)}</td></tr><tr><td>Retención de IVA</td><td>${$f(t.ri)}</td></tr><tr><td>ICA</td><td>${$f(t.ica)}</td></tr>
+      <tr><td>Devoluciones</td><td>${$f(t.dev)}</td></tr><tr><td>Descuentos</td><td>${$f(t.dcto)}</td></tr>${st.lineas.some(l => l.anulado) ? `<tr><td>Recibos anulados</td><td>${st.lineas.filter(l => l.anulado).length}</td></tr>` : ''}
+      <tr class="sec"><td colspan="2">RECIBIDO</td></tr>
+      <tr><td>Efectivo</td><td>${$f(t.ef)}</td></tr><tr><td>Cheques (${t.nch})</td><td>${$f(t.ch)}</td></tr><tr><td>Transferencias (${t.ntr})</td><td>${$f(t.tr)}</td></tr>${t.nco ? `<tr><td>Consignaciones (${t.nco})</td><td>${$f(t.co)}</td></tr>` : ''}
+      <tr class="tot"><td>TOTAL RECIBO</td><td>${$f(t.total)}</td></tr></table>`;
+  }
+  const infoFac = f => { const d = dias(f.fecha);
+    return `${esc(empLabel(f.emp))} · ${fCorta(f.fecha)} · <span style="color:${d > 45 ? '#b42318' : 'inherit'}">${hace(d)}</span> · ${$f(f.total)}` +
+      (f.abonado ? ` · <b>pagado antes ${$f(f.abonado)}</b>` : '') +
+      (f.pagos && f.pagos.length ? `<br><span class="ina">Ya reportada: ${esc(f.pagos.join(' · '))}</span>` : ''); };
+
+  /* ---------------- cliente y facturas ---------------- */
+  const cargarFacturas = cod => FACTS[cod] ? Promise.resolve(FACTS[cod]) : api('recibo.facturas', { cod, id: st.id }).then(r => FACTS[cod] = r || []).catch(e => { aviso(e.message, true); return []; });
+  function aplicarCliente(el, i, c) {
+    const l = st.lineas[i]; Object.assign(l, { cod: c.cod, nombre: c.nombre, ciudad: c.ciudad, inactivo: c.inactivo, factura: '', facSistema: false, fsin: 0, femp: '', ftotal: 0 });
+    el.querySelector('[data-c=cod]').value = c.cod; el.querySelector('[data-c=nombre]').value = c.nombre; el.querySelector('[data-c=factura]').value = '';
+    el.querySelector('[data-o=ciu]').innerHTML = esc(c.ciudad) + (c.inactivo ? ' · <span class="ina">cliente inactivo</span>' : '');
+    el.querySelector('[data-c=factura]').placeholder = 'Toque para ver facturas';
+    cargarFacturas(c.cod).then(() => refrescar(i)); refrescar(i); cambio();
+  }
+  function buscador(el, inp, i) {
+    const ls = inp.parentElement.querySelector('.ls'); let t = null, seq = 0, res = [];
+    const cerrar = () => ls.style.display = 'none';
+    const mostrar = () => { ls.innerHTML = res.length ? res.map((c, j) => `<div data-j="${j}"><b>${esc(c.cod)}</b> · ${esc(c.nombre)}<br><small>${esc(c.ciudad)}</small>${c.inactivo ? ' <span class="ina">inactivo</span>' : ''}</div>`).join('') : '<div><small>Sin resultados</small></div>';
+      ls.style.display = 'block'; ls.querySelectorAll('[data-j]').forEach(d => d.addEventListener('mousedown', ev => { ev.preventDefault(); aplicarCliente(el, i, res[+d.dataset.j]); cerrar(); el.querySelector('[data-c=factura]').focus(); })); };
+    inp.addEventListener('input', () => {
+      Object.assign(st.lineas[i], { nombre: inp.value, cod: '', ciudad: '', factura: '', facSistema: false });
+      el.querySelector('[data-c=cod]').value = ''; el.querySelector('[data-o=ciu]').textContent = '';
+      clearTimeout(t); const q = inp.value.trim(); if (q.length < 2) return cerrar();
+      t = setTimeout(() => { const my = ++seq; ls.innerHTML = '<div><small>Buscando…</small></div>'; ls.style.display = 'block';
+        api('recibo.buscar', { q }).then(r => { if (my === seq) { res = r; mostrar(); } }).catch(e => ls.innerHTML = '<div><small>' + esc(e.message) + '</small></div>'); }, 350);
+    });
+    inp.addEventListener('blur', () => setTimeout(cerrar, 150));
+  }
+  function selFactura(el, inp, i) {
+    const ls = inp.parentElement.querySelector('.ls'), cerrar = () => ls.style.display = 'none';
+    const mostrar = () => {
+      const l = st.lineas[i], fs = FACTS[l.cod];
+      if (!l.cod) { ls.innerHTML = '<div><small>Primero escoja el cliente</small></div>'; ls.style.display = 'block'; return; }
+      if (!fs) { ls.innerHTML = '<div><small>Buscando facturas…</small></div>'; ls.style.display = 'block'; cargarFacturas(l.cod).then(() => { if (document.activeElement === inp) mostrar(); }); return; }
+      const q = inp.value.trim().toUpperCase().replace(/\s+/g, ''), qd = q.replace(/\D/g, '');
+      const le = letraDe(st), otras = fs.filter(f => !facDeLetra(f, le)).length;
+      const ver = fs.filter(f => facDeLetra(f, le) && (!q || f.doc.indexOf(q) >= 0 || (qd && f.doc.replace(/\D/g, '').indexOf(qd) >= 0)));
+      if (!ver.length) { ls.innerHTML = `<div><small>${fs.length - otras ? 'Ninguna coincide: siga escribiendo la factura a mano' : 'No hay facturas ' + le + ' recientes de este cliente: escríbala a mano'}${otras ? ' · ' + otras + ' factura(s) son de la otra letra (van en un informe ' + (le === 'G' ? 'N' : 'G') + ')' : ''}</small></div>`; ls.style.display = 'block'; return; }
+      ls.innerHTML = ver.map(f => { const d = dias(f.fecha); return `<div data-j="${fs.indexOf(f)}"><b>${esc(f.doc)}</b> · ${$f(f.total)} <small>${esc(empLabel(f.emp))}</small><br><small>${fCorta(f.fecha)} · <span style="color:${d > 45 ? '#b42318' : 'inherit'}">${hace(d)}</span>${(f.notas || []).length ? ' · notas: ' + f.notas.map(n => esc(n.doc)).join(', ') : ''}</small>${f.abonado ? `<br><span class="ok">pagado ${$f(f.abonado)} · saldo ${$f(f.saldo)}</span>` : ''}</div>`; }).join('');
+      ls.style.display = 'block';
+      ls.querySelectorAll('[data-j]').forEach(d => d.addEventListener('mousedown', ev => { ev.preventDefault(); elegir(fs[+d.dataset.j]); }));
+    };
+    const elegir = f => {
+      const l = st.lineas[i];
+      const ns = f.notas || [], sN = ns.reduce((a, n) => a + n.sin, 0), tN = ns.reduce((a, n) => a + n.total, 0);
+      const tot = f.total - tN, base = f.sin - sN;
+      Object.assign(l, { factura: f.doc, facSistema: true, vf: String(tot), fsin: base, femp: f.emp, ftotal: tot, ratio: f.total ? f.sin / f.total : 0, base: '' });
+      if (f.abonado && !l.tipo) l.tipo = 'Saldo';
+      inp.value = f.doc; cerrar();
+      if (chk(l, 'rf')) { l.rf = ''; sugerirRet(i, 'total'); }
+      if (chk(l, 'ri')) { const r = reteIva(l, i); if (r) l.ri = String(r.sug); }
+      pintarLinea(i); cambio();
+      if (ns.length) aviso('Esta factura tiene ' + ns.length + ' nota' + (ns.length > 1 ? 's' : '') + ' (' + ns.map(n => n.doc).join(', ') + '): se propone el valor ' + $f(tot) + '.');
+      if (f.pagos && f.pagos.length) aviso('Ojo: esta factura ya tiene pagos reportados (' + f.pagos.join(' · ') + ')', true);
+    };
+    inp.addEventListener('focus', mostrar);
+    inp.addEventListener('input', () => { Object.assign(st.lineas[i], { factura: inp.value.toUpperCase(), facSistema: false, fsin: 0, femp: '', ftotal: 0, ratio: 0, saldo: '' }); mostrar(); refrescar(i); cambio(); });
+    inp.addEventListener('blur', () => setTimeout(cerrar, 150));
+  }
+
+  /* ---------------- cerrar, ver, imprimir ---------------- */
+  async function cerrar() {
+    const lin = st.lineas.filter(usada);
+    if (!lin.length) return aviso('Agregue al menos una factura', true);
+    for (const l of lin) {
+      const n = st.lineas.indexOf(l) + 1;
+      if (l.anulado) { if (!digitos(l.recibo)) return aviso('Falta el número del recibo anulado en el pago ' + n, true); continue; }
+      if (!digitos(l.recibo)) return aviso('Falta el número de recibo en el pago ' + n, true);
+      if (!l.cod || !l.nombre) return aviso('Falta el cliente en el pago ' + n, true);
+      if (!l.tipo) return aviso('Falta el tipo de pago en el pago ' + n, true);
+      if (l.tipo === 'Abono' && vac(l.pag)) return aviso('Falta el valor pagado en el pago ' + n, true);
+      if (!calc(l).cuadra) return aviso('El pago ' + n + ' no cuadra: revise descuento y valor pagado', true);
+    }
+    for (const k of recibosDe(lin.filter(l => !l.anulado))) {
+      const c = cuadreRecibo(k);
+      if (c.sinForma) return aviso('Falta la forma de pago en el recibo ' + k, true);
+      if (!c.ok) return aviso('El recibo ' + k + ' no cuadra: facturas ' + $f(c.f) + ' y pagos ' + $f(c.p) + '. Revise las formas de pago.', true);
+    }
+    const ajenos = lin.filter(l => talDe(st.vendedor).libros.length && !libroDe(nRec(l.recibo), letraDe(st))).map(l => l.recibo);
+    if (ajenos.length && !confirm('Estos recibos no están en sus talonarios ' + letraDe(st) + ': ' + ajenos.join(', ') + '. ¿Cerrar de todos modos?')) return;
+    const malos = lin.map(l => st.lineas.indexOf(l)).filter(i => avisoRecibo(i));
+    if (malos.length && !confirm('Los recibos de los pagos ' + malos.map(i => i + 1).join(', ') + ' no siguen el consecutivo. ¿Cerrar de todos modos?')) return;
+    const t = sumas();
+    if (!confirm(`¿Cerrar el informe?\n\nTotal recibo: ${$f(t.total)}\nEfectivo ${$f(t.ef)} · Cheques (${t.nch}) ${$f(t.ch)} · Transferencias (${t.ntr}) ${$f(t.tr)}${t.nco ? ' · Consignaciones (' + t.nco + ') ' + $f(t.co) : ''}\n\nPodrá modificarlo mientras cartera no lo reciba.`)) return;
+    clearTimeout(timer);
+    const b = document.getElementById('rc-cerrar'); b.disabled = true;
+    try {
+      const r = await api('recibo.cerrar', { inf: st, ver: st.ver });
+      Object.assign(st, { estado: 'CERRADO', cierre: r.cierre, ver: r.ver, inicio: r.inicio });
+      try { localStorage.removeItem(LSK()); } catch (e) {}
+      aviso('✔ Informe cerrado'); pintar();
+    } catch (e) { b.disabled = false; aviso(e.message === 'CAMBIO_EN_OTRO_EQUIPO' ? 'El informe se cambió en otro equipo: vuelva a abrirlo.' : 'No se pudo cerrar: ' + e.message, true); }
+  }
+  function imprimir() { let p = document.getElementById('rc-print'); if (!p) { p = document.createElement('div'); p.id = 'rc-print'; document.body.appendChild(p); } p.innerHTML = htmlInforme(); setTimeout(() => window.print(), 200); }
+  function vistaPrevia() {
+    let o = document.getElementById('rc-prev');
+    if (!o) { o = document.createElement('div'); o.id = 'rc-prev'; document.body.appendChild(o); }
+    o.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;overflow:auto;padding:12px';
+    o.innerHTML = `<div class="rc" style="max-width:1000px;margin:auto"><div class="card vista" style="margin:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b>Vista previa${st.estado === 'ABIERTO' || st.estado === 'NUEVO' ? ' (informe abierto)' : ''}</b><button class="q" id="rc-px" style="font-size:22px">✕</button></div>
+      ${htmlInforme()}</div><div class="bt" style="background:transparent"><button class="b2" id="rc-pp">Imprimir</button><button class="b3" id="rc-pc">Cerrar vista previa</button></div></div>`;
+    const fuera = () => o.remove();
+    document.getElementById('rc-px').onclick = fuera; document.getElementById('rc-pc').onclick = fuera;
+    document.getElementById('rc-pp').onclick = () => { fuera(); imprimir(); };
+  }
+  function pintarCerrado() {
+    const rec = st.estado === 'RECIBIDO', n = nivelDe('recibo');
+    document.getElementById('rc-cuerpo').innerHTML = `<div class="card">${rec
+        ? `<b>✔ Recibido por cartera — en firme</b>${st.recibido ? ' · ' + esc(st.recibido) : ''}. Ya no se puede cambiar.`
+        : `<b>Informe cerrado el ${esc(st.cierre)}.</b> Imprímalo y entréguelo en la empresa. Mientras cartera no lo reciba, puede modificarlo.`}</div>
+      <div class="card vista">${htmlInforme()}</div>
+      ${n >= 3 && U.elige ? '<button class="btn" id="rc-pend" style="width:100%;margin-bottom:10px">‹ Ver todos los por recibir</button>' : ''}
+      <div class="bt">${!rec && n >= 2 && !state.verComo ? '<button class="b3" id="rc-mod">✏ Modificar</button>' : ''}
+        ${U.impresora && n >= 2 ? '<button class="b1" id="rc-imp">🖨 Enviar a la impresora</button>' : ''}
+        <button class="b2" id="rc-prn">Imprimir o guardar PDF</button>
+        ${n >= 3 && !state.verComo ? (rec ? '<button class="b3" id="rc-dev">Devolver a cerrado</button>' : '<button class="bc" id="rc-rec">✔ Marcar recibido</button>') : ''}</div>`;
+    const b = id => document.getElementById(id);
+    if (b('rc-imp')) b('rc-imp').onclick = async () => { b('rc-imp').disabled = true; try { await api('recibo.imprimir', { id: st.id }); aviso('✔ Enviado a la impresora de la oficina'); } catch (e) { aviso(e.message, true); } b('rc-imp').disabled = false; };
+    b('rc-prn').onclick = imprimir;
+    if (b('rc-pend')) b('rc-pend').onclick = () => { VEND = ''; volverLista(); };
+    const cambiar = async (accion, req, msg) => { try { const r = await api(accion, Object.assign({ id: st.id }, req)); cargar(VEND, r); aviso(msg); } catch (e) { aviso(e.message, true); } };
+    if (b('rc-mod')) b('rc-mod').onclick = () => { if (confirm('¿Modificar este informe? Vuelve a quedar abierto; al terminar ciérrelo otra vez.')) cambiar('recibo.reabrir', {}, '✔ Informe abierto para modificar'); };
+    if (b('rc-rec')) b('rc-rec').onclick = () => { if (confirm('¿Marcar como recibido por cartera? El vendedor ya no podrá cambiarlo.')) cambiar('recibo.recibir', { si: true }, '✔ Recibido: queda en firme'); };
+    if (b('rc-dev')) b('rc-dev').onclick = () => { if (confirm('¿Devolverlo a cerrado? El vendedor podrá modificarlo otra vez.')) cambiar('recibo.recibir', { si: false }, '✔ Devuelto a cerrado'); };
+  }
+  function htmlInforme() { return mcInformeImpreso_(st, dv(), calc, usada); }   // st.pagos va dentro de st
+})();
+
+</script>
+<script>PANTALLAS.recibo({ nombre: 'Informe de Cartera' });</script>
+</body></html>

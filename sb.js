@@ -32,7 +32,7 @@
         headers:{ 'Content-Type':'application/json', apikey: CFG.SB_KEY, Authorization: 'Bearer ' + at }, body: JSON.stringify(body || {}) });
       const t = await r.text();
       if (r.status === 401) throw new Error('SIN_SESION');
-      if (!r.ok) throw new Error('La base de datos respondió ' + r.status + '. Intente de nuevo.');
+      if (!r.ok){ let m = ''; try { m = JSON.parse(t).message || ''; } catch(e){} throw new Error(m || ('La base de datos respondió ' + r.status + '. Intente de nuevo.')); }
       return t ? JSON.parse(t) : null;
     } catch(e){
       if (e.name === 'AbortError') throw new Error('La base de datos no respondió. Revise la conexión e intente de nuevo.');
