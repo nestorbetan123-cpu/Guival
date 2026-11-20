@@ -277,7 +277,7 @@ PANTALLAS.externa = async t => {
     extra.persona = a.persona; extra.como = a.como;
   }
   if (t.id==='dashboard' && !DEMO){   // Dashboard: pantalla propia de la app (datos por el servidor de la app, caché en el equipo)
-    $app.innerHTML = barra(t.nombre, true) + `<iframe src="dashboard.html?v=4" title="${esc(t.nombre)}" class="embed"></iframe>`; return;
+    $app.innerHTML = barra(t.nombre, true) + `<iframe src="dashboard.html?v=5" title="${esc(t.nombre)}" class="embed"></iframe>`; return;
   }
   // Indicadores y Entradas: pantallas propias que leen de la base nueva (Supabase). Si la persona todavía no tiene
   // sesión en la base nueva (entró antes del cambio) o el administrador está en "Ver como", se abre la pantalla anterior.

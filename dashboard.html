@@ -227,10 +227,10 @@ async function cargar(){
   const db=await idb(); const partes=[]; let hechas=0;
   const meses=DIM.meses;
   const pref=(window.GUIVAL_CLAVE||'')+':';
-  const vigentes=new Set(meses.map(m=>pref+'v2:'+m+':'+DIM.parts[m]));
+  const vigentes=new Set(meses.map(m=>pref+'v3:'+m+':'+DIM.parts[m]));
   let sig=0; const trabajar=async()=>{while(sig<meses.length){const mi=sig++; await traer(meses[mi],mi)}};
   const traer=async (m,mi)=>{
-    const clave=pref+'v2:'+m+':'+DIM.parts[m];
+    const clave=pref+'v3:'+m+':'+DIM.parts[m];
     let reg=await idbGet(db,clave);
     if(!reg||!reg.buf){const p=await fuente.parte(m); reg={n:p.n,docs:p.docs||[],buf:await unzip(p.z)}; idbPut(db,clave,reg)}
     partes[mi]=reg; hechas++;
