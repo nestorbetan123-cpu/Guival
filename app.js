@@ -282,7 +282,7 @@ PANTALLAS.externa = async t => {
   // Indicadores y Entradas: pantallas propias que leen de la base nueva (Supabase). Si la persona todavía no tiene
   // sesión en la base nueva (entró antes del cambio) o el administrador está en "Ver como", se abre la pantalla anterior.
   const NUEVAS = { indicadores:'indicadores.html?v=1', ingresos:'entradas.html?v=1' };
-  if (perfilActivo().usuario.superadmin) NUEVAS.recibo = 'cartera.html?v=2';   // Informe de Cartera nuevo: en prueba (solo Nestor) hasta aprobarlo
+  if (perfilActivo().usuario.superadmin) NUEVAS.recibo = 'cartera.html?v=3';   // Informe de Cartera nuevo: en prueba (solo Nestor) hasta aprobarlo
   if (NUEVAS[t.id] && !DEMO && !state.verComo && window.GuivalSB && GuivalSB.tiene()){
     $app.innerHTML = barra(t.nombre, true) + `<iframe src="${NUEVAS[t.id]}" title="${esc(t.nombre)}" class="embed"></iframe>`; return;
   }

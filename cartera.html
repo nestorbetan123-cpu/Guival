@@ -41,7 +41,6 @@ async function api(accion, req) {
       const u = await R('cartera_inicio');
       if (!u) throw new Error('Su usuario no tiene acceso al Informe de Cartera. Pídaselo a Nestor.');
       NIVEL = u.nivel || 0; const p = String(u.hoy).split('/'); u.hoyIso = p[2] + '-' + p[1] + '-' + p[0]; u.impresora = false;
-      if (u.recibe) u.abiertos = (await R('cartera_abiertos')) || [];
       if (!u.elige) { const v = u.vendedores[0].vendedor; u.lista = await R('cartera_lista', { v }) || []; u.tal = await R('cartera_tal_de', { v }); }
       return u;
     }
@@ -321,7 +320,7 @@ const MC_CSS_IMPRESO = `
     T = t; $app.innerHTML = barra(t.nombre, true) + '<div class="spin"></div>';
     try { U = await api('recibo.inicio'); } catch (e) { $app.innerHTML = barra(t.nombre, true) + `<div class="wrap"><div class="card">${esc(e.message)}</div></div>`; return; }
     FACTS = {}; st = null;
-    if (U.elige) { VEND = ''; LISTA = []; PEND = U.pendientes || []; ABIERTOS = U.abiertos || []; return pintarLista(); }
+    if (U.elige) { VEND = ''; LISTA = []; PEND = U.pendientes || []; return pintarLista(); }
     VEND = U.vendedores[0].vendedor; LISTA = U.lista || []; TAL[VEND] = U.tal || { libros: [], ultimo: {} }; pintarLista();
   };
 
@@ -336,8 +335,9 @@ const MC_CSS_IMPRESO = `
         <span style="background:#fff3c4;color:#7a5b00;border-radius:12px;padding:3px 10px;font-size:12px;font-weight:600;white-space:nowrap">Sin terminar</span></div>
         <div class="sub">${x.pagos} factura${x.pagos === 1 ? '' : 's'} · ${$f(x.total)}${x.ver ? ' · guardado ' + guardado(x.ver) : ''}</div>
         <div class="g2" style="margin-top:8px"><button class="btn" data-abrir>Seguir llenando</button>${nivelDe('recibo') >= 2 && !state.verComo ? '<button class="btn" data-borrar style="color:#b42318;border-color:#b42318">🗑 Borrar</button>' : '<div></div>'}</div></div>`;
-    const abiertos = LISTA.filter(x => x.estado === 'ABIERTO');
-    const items = LISTA.filter(x => x.estado !== 'ABIERTO').map(x => { const e = ESTADO[x.estado] || [x.estado, '#eee', '#333'];
+    const LV = nivelDe('recibo') >= 3 ? LISTA.filter(x => x.estado !== 'ABIERTO') : LISTA;   // cartera y gerencia no ven lo que no está terminado
+    const abiertos = LV.filter(x => x.estado === 'ABIERTO');
+    const items = LV.filter(x => x.estado !== 'ABIERTO').map(x => { const e = ESTADO[x.estado] || [x.estado, '#eee', '#333'];
       return `<div class="card it" data-id="${esc(x.id)}" style="cursor:pointer">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b>Informe del ${esc(x.inicio)}${x.cierre ? ' al ' + esc(x.cierre) : ''}</b>
         <span style="background:${e[1]};color:${e[2]};border-radius:12px;padding:3px 10px;font-size:12px;font-weight:600;white-space:nowrap">${e[0]}</span></div>
@@ -347,8 +347,7 @@ const MC_CSS_IMPRESO = `
       <div class="card"><div class="g3">
         <div><label>Vendedor</label>${U.elige ? `<select id="rc-ven"><option value="">${nivelDe('recibo') >= 3 ? '— Todos —' : '— Escoja —'}</option>${U.vendedores.map(x => `<option ${x.vendedor === VEND ? 'selected' : ''}>${esc(x.vendedor)}</option>`).join('')}</select>` : `<div class="fijo">${esc(v.vendedor)}</div>`}</div>
         <div><label>Código</label><div class="fijo">${esc(v.codigo || '—')}</div></div><div><label>Zona</label><div class="fijo">${esc(v.zona || '—')}</div></div></div></div>
-      ${!VEND ? (nivelDe('recibo') >= 3 ? `${ABIERTOS.length ? `<h3 style="margin:6px 2px 10px;font-size:15px">Sin terminar · todos los vendedores (${ABIERTOS.length})</h3>${ABIERTOS.map(x => tarjetaAbierto(x, true)).join('')}` : ''}
-        <h3 style="margin:6px 2px 10px;font-size:15px">Por recibir · todos los vendedores (${PEND.length})</h3>
+      ${!VEND ? (nivelDe('recibo') >= 3 ? `<h3 style="margin:6px 2px 10px;font-size:15px">Por recibir · todos los vendedores (${PEND.length})</h3>
         ${PEND.map(x => `<div class="card pe" data-id="${esc(x.id)}" data-v="${esc(x.vendedor)}" style="cursor:pointer">
           <div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(x.vendedor)}</b><span class="sub" style="margin:0">Cerrado el ${esc(x.cierre)}</span></div>
           <div class="sub">Informe del ${esc(x.inicio)} · ${x.pagos} pago${x.pagos === 1 ? '' : 's'} · Total recibo ${$f(x.total)}</div>
@@ -389,7 +388,7 @@ const MC_CSS_IMPRESO = `
     $app.innerHTML = barra(T.nombre, true) + '<div class="spin"></div>';
     try {
       if (VEND) { LISTA = await api('recibo.lista', { vendedor: VEND }); TAL[VEND] = await api('recibo.tal_de', { vendedor: VEND }); }
-      else { LISTA = []; if (nivelDe('recibo') >= 3) { PEND = await api('recibo.pendientes'); ABIERTOS = await api('recibo.abiertos'); } }
+      else { LISTA = []; if (nivelDe('recibo') >= 3) PEND = await api('recibo.pendientes'); }
     } catch (e) { aviso(e.message, true); }
     pintarLista();
   }
