@@ -99,7 +99,7 @@ begin
     delete from dash_partes where mes = datos->>'mes' and not (datos->'partes' ? dash_partes.llave);
     insert into dash_partes(mes, llave, ver, datos)
     select datos->>'mes', e.key, datos->>'ver', e.value from jsonb_each(datos->'partes') e
-    on conflict (mes, llave) do update set ver = excluded.ver, datos = excluded.datos;
+    on conflict on constraint dash_partes_pkey do update set ver = excluded.ver, datos = excluded.datos;
     get diagnostics n = row_count; return n;
   end if;
   raise exception 'tipo desconocido: %', tipo;
