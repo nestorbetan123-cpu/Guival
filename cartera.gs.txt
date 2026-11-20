@@ -1,0 +1,59 @@
+
+/* ---------- Cartera (fase 3, 20/11/2026) ---------- */
+function sbCartera_(tipo, datos, reemplazar) {
+  return sbRobot_('robot_cartera', { tipo: tipo, datos: datos, reemplazar: reemplazar !== false });
+}
+/** Accesos, vendedores, clientes y facturas. Lo llama Cartera_alProcesarCierre con cada CIERRE. */
+function sbCarteraRef_() {
+  var out = {};
+  out.accesos = sbCartera_('accesos', mcTabla_('Accesos').filter(function (r) { return r.Clave; }).map(function (r) {
+    return [r.Clave, r.Nombre || '', r.Ve || '', mcNorm_(String(r.Vendedor || '').split(/[,;]/)[0]), String(r.Cartera || '').toLowerCase().trim(), /^s[ií]$/i.test(r.Activo)];
+  }));
+  MC_VEND_ = null;
+  var L = mcVendedores_().lista;
+  out.vendedores = sbCartera_('vendedores', Object.keys(L).map(function (k) { return [L[k].vendedor, L[k].codigo, L[k].zona]; }));
+  out.clientes = sbCartera_('clientes', mcClientes_().filter(function (c) { return c[0]; }).map(function (c) { return [c[0], c[1], c[2], /^inactivo$/i.test(c[3])]; }));
+  var it = mcCarpeta_().getFiles(), nf = 0;
+  while (it.hasNext()) {
+    var f = it.next();
+    if (!/^facturas .+\.json$/.test(f.getName())) continue;
+    nf += sbCartera_('facturas', JSON.parse(f.getBlob().getDataAsString()));
+  }
+  out.facturas = nf;
+  return out;
+}
+/** Ejecutar desde el editor para cargar o refrescar todo a mano. */
+function sbCarteraRef() { Logger.log('Cartera → Supabase: ' + JSON.stringify(sbCarteraRef_())); }
+
+/** UNA vez, al pasar al informe nuevo: talonarios e informes existentes (agrupando las filas por número de recibo). */
+function sbCarteraMigrar() {
+  var tal = mcTalLeer_().map(function (t) { return [t.id, t.letra, t.desde, t.hasta, t.vendedor, t.entregado, t.entrego, t.estado, t.historial]; });
+  var nt = sbCartera_('talonarios', tal);
+  var V = mcVendedores_().lista, g = {}, orden = [];
+  mcFilas_().forEach(function (r) { var id = r[MCI['ID informe']]; if (!id) return; if (!g[id]) { g[id] = []; orden.push(id); } g[id].push(r); });
+  var infs = orden.map(function (id) {
+    var inf = mcArmar_(g[id]), recs = {}, lista = [];
+    inf.lineas.forEach(function (l, i) {
+      var key = String(l.recibo || '').trim().toUpperCase() || ('SIN-' + i);
+      var R = recs[key];
+      if (!R) { R = recs[key] = { recibo: String(l.recibo || '').trim().toUpperCase(), facturas: [], pagos: [], _f: {} }; lista.push(R); }
+      if (l.anulado) { R.anulado = true; return; }
+      var c = mcCalc_(l);
+      c.base = mcChk_(l, 'rf') ? (l.facSistema ? mcNum_(l.fsin) : mcNum_(l.base)) : '';
+      var f = {}; Object.keys(l).forEach(function (k) { if (k !== 'forma' && k !== 'recibo') f[k] = l[k]; });
+      f.c = c; R.facturas.push(f);
+      var forma = l.forma || 'Efectivo';
+      R._f[forma] = (R._f[forma] || 0) + (c.rec || 0);
+    });
+    lista.forEach(function (R) {
+      Object.keys(R._f).forEach(function (fo) { R.pagos.push({ forma: fo, valor: Math.round(R._f[fo]), banco: '', ref: '' }); });
+      delete R._f;
+    });
+    var v = V[inf.vendedor] || {};
+    return { id: inf.id, vendedor: inf.vendedor, codigo: v.codigo || '', zona: v.zona || '', empresa: inf.empresa || 'G', estado: inf.estado,
+             inicio: inf.inicio, cierre: inf.cierre, recibido: inf.recibido, obs: inf.obs, ver: inf.ver, usuario: '', recibos: lista };
+  });
+  var ni = 0;
+  for (var i = 0; i < infs.length; i += 50) ni += sbCartera_('informes', infs.slice(i, i + 50), false);
+  Logger.log('Migrado: ' + nt + ' talonarios, ' + infs.length + ' informes (' + ni + ' filas).');
+}
