@@ -438,16 +438,16 @@ declare n int := 0;
 begin
   if not app.robot_ok(llave) then raise exception 'llave de robot no válida'; end if;
   if tipo = 'accesos' then
-    if reemplazar then delete from accesos; end if;
+    if reemplazar then delete from accesos where true; end if;
     insert into accesos(clave, nombre, ve, vendedor, cartera, activo)
     select x->>0, x->>1, x->>2, x->>3, x->>4, coalesce((x->>5)::boolean, true) from jsonb_array_elements(datos) x
     on conflict (clave) do update set nombre = excluded.nombre, ve = excluded.ve, vendedor = excluded.vendedor, cartera = excluded.cartera, activo = excluded.activo;
   elsif tipo = 'vendedores' then
-    if reemplazar then delete from cartera_vendedores; end if;
+    if reemplazar then delete from cartera_vendedores where true; end if;
     insert into cartera_vendedores(vendedor, codigo, zona) select x->>0, x->>1, x->>2 from jsonb_array_elements(datos) x
     on conflict (vendedor) do update set codigo = excluded.codigo, zona = excluded.zona;
   elsif tipo = 'clientes' then
-    if reemplazar then delete from clientes; end if;
+    if reemplazar then delete from clientes where true; end if;
     insert into clientes(cod, nombre, ciudad, inactivo) select x->>0, x->>1, x->>2, coalesce((x->>3)::boolean,false) from jsonb_array_elements(datos) x
     on conflict (cod) do update set nombre = excluded.nombre, ciudad = excluded.ciudad, inactivo = excluded.inactivo;
   elsif tipo = 'facturas' then   -- datos = {cod: [[doc, fecha, total, dev, vendedor, sin, emp, notas], …]} (un archivo del índice)
@@ -457,7 +457,7 @@ begin
     from jsonb_each(datos) e(k, v), jsonb_array_elements(e.v) x
     on conflict (cod_cliente, doc) do nothing;
   elsif tipo = 'talonarios' then
-    if reemplazar then delete from talonarios; end if;
+    if reemplazar then delete from talonarios where true; end if;
     insert into talonarios(id, letra, desde, hasta, vendedor, entregado, entrego, estado, historial)
     select x->>0, x->>1, x->>2, x->>3, x->>4, x->>5, x->>6, coalesce(nullif(x->>7,''),'ACTIVO'), x->>8 from jsonb_array_elements(datos) x
     on conflict (id) do nothing;
