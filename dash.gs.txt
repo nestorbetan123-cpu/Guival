@@ -3,8 +3,7 @@
 /** Sube a Supabase lo del Dashboard: dims, quién ve qué copia y, por cada mes que cambió, una copia filtrada por acceso.
  *  Lo llama actualizarTablero_ con cada cierre; sbDashTodo lo hace con todos los meses (desde el editor). */
 function sbDash_(todo, ms) {
-  var dimsTxt = dimsTexto_(), dims = JSON.parse(dimsTxt);
-  sbRobot_('robot_dash', { tipo: 'dims', datos: { dims: dimsTxt } });
+  var dimsTxt = dimsTexto_(), dims = JSON.parse(dimsTxt);   // dims se sube AL FINAL, cuando ya están las copias
 
   // Quién ve qué: una llave por cada forma distinta de acceso.
   var acc = accesos_(), llaves = {}, filas = [], como = {};
@@ -33,6 +32,7 @@ function sbDash_(todo, ms) {
     hechos[mes] = ver + '|' + firma; n++;
     props.setProperty('SB_DASH_VER', JSON.stringify(hechos));
   });
+  sbRobot_('robot_dash', { tipo: 'dims', datos: { dims: dimsTxt } });
   var faltan = (dims.meses || []).filter(function (m) { return hechos[m] !== ((dims.parts && dims.parts[m]) || '') + '|' + firma; }).length;
   return { meses: n, faltan: faltan, llaves: Object.keys(llaves).length };
 }
