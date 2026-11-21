@@ -182,7 +182,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,.chip:focus-visibl
   // Si el servidor está ocupado o falla la red, reintenta (1,5 s y 3 s) antes de mostrar error.
   function reintentar(fn, n){ n = n || 0; return fn().catch(function(e){ if (e.fatal || n >= 2) throw e; return new Promise(function(ok){ setTimeout(ok, 1500 * (n + 1)); }).then(function(){ return reintentar(fn, n + 1); }); }); }
   // Base nueva (Supabase) primero; si aún no tiene sesión nueva o falta algún mes, usa el servidor anterior.
-  var SB = window.GuivalSB, usarSB = false && !!(SB && SB.tiene() && CFG.SB_URL);   // en pausa (20/11): la base nueva quedó un cierre atrás; mientras se corrige, todo del servidor anterior
+  var SB = window.GuivalSB, usarSB = !!(SB && SB.tiene() && CFG.SB_URL);   // la base solo entrega un mes si su versión coincide con dims; si no, va al servidor anterior
   function sb(fn, body){ return SB.rpc(fn, Object.assign({ como: extra.como || '' }, body || {})); }
   function anterior(){ usarSB = false; }
   window.GUIVAL_FUENTE = {
